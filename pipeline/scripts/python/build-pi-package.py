@@ -62,7 +62,7 @@ def copy_tree(src, dst, pat='*'):
     for p in sorted(glob.glob(os.path.join(src, pat))):
         if not os.path.isfile(p):
             continue
-        # Box Drive が同期の競合で作る写し（`T_4_5_2 (311-system+box.team-k@…).html`）は
+        # Box Drive が同期の競合で作る写し（`T_4_5_2 (user@example.com).html`）は
         # PI へ渡す形に入れない。消さずに Box へ残しておき、別の端末の変更を取り込んでから
         # 図表を作り直して片付ける（どちらが新しいかを人が判断する必要があるため）
         b = os.path.basename(p)
