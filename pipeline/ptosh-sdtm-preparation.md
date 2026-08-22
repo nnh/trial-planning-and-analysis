@@ -3,7 +3,7 @@
 作成日：2026-08-15
 改訂日：2026-08-22
 
-Ptosh（データセンターの EDC）から受領した SDTM 風 CSV と define.xml を、CDISC CORE で検証できる状態にするまでの手順。試験A で 2026-08-15 に実施した内容を、他試験でも使える形に整理したもの。
+Ptosh（データセンターの EDC）から受領した、SDTM のドメイン名・変数名は使うが派生変数を持たない CSV と define.xml を、CDISC CORE で検証できる状態にするまでの手順。試験A で 2026-08-15 に実施した内容を、他試験でも使える形に整理したもの。
 
 CORE 自体の使い方・導入・実行時の落とし穴は [`sdtm-conformance-validation.md`](sdtm-conformance-validation.md) が正本。本書は「渡すデータを作る側」を扱う。
 
