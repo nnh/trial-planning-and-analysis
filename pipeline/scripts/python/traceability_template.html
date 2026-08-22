@@ -1,0 +1,1064 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TRIAL__ トレーサビリティ索引</title>
+<!--
+  画面の作り。データの組み立ては scripts/build-traceability.py。
+  1本の鎖を縦に並べ、どの段からでも選び直せる形にしている。段をクリックすると
+  その段で選べるものが出る（前後の段で絞ったものだけ）。詳細は要るときだけ開く。
+-->
+<style>
+ :root { --line:#e2e2e2; --accent:#004a95; --muted:#767676; --hi:#eef4fb; --bg:#fff; }
+ * { box-sizing:border-box; }
+ body { font-family:"Hiragino Sans","Yu Gothic UI",-apple-system,"Segoe UI",Meiryo,sans-serif;
+        margin:0; color:#1a1a1a; background:var(--bg); font-size:15px; line-height:1.55; }
+ a { color:var(--accent); cursor:pointer; }
+ main { max-width:900px; margin:0 auto; padding:0 20px 80px; }
+
+ header { padding:14px 20px 12px; border-bottom:1px solid var(--line); }
+ header .in { max-width:900px; margin:0 auto; display:flex; align-items:baseline; gap:14px;
+              flex-wrap:wrap; }
+ header h1 { margin:0; font-size:1rem; font-weight:600; }
+ header .flow { font-size:.78rem; color:var(--muted); width:100%; margin-top:2px; }
+ header .whole { margin-left:auto; display:flex; align-items:center; gap:6px; }
+ header .whole .bl { font-size:.74rem; color:var(--muted); }
+
+ /* 検索 */
+ .find { position:sticky; top:0; background:var(--bg); padding:16px 0 8px; z-index:9; }
+ .find input { width:100%; font:inherit; font-size:1rem; padding:11px 14px;
+               border:1px solid var(--line); border-radius:8px; background:#fafafa; }
+ .find input:focus { outline:2px solid var(--accent); outline-offset:-1px; background:#fff; }
+ .hits { border:1px solid var(--line); border-radius:8px; margin-top:4px; overflow:hidden;
+         box-shadow:0 6px 18px rgba(0,0,0,.07); max-height:60vh; overflow-y:auto; display:none; }
+ .hits.on { display:block; }
+ .hit { padding:8px 14px; cursor:pointer; display:flex; gap:10px; align-items:baseline; }
+ .hit:hover, .hit.cur { background:var(--hi); }
+ .hit .tag { font-size:.68rem; color:var(--muted); min-width:78px; }
+
+ /* 一覧から選ぶ */
+ .browse { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:2px 0 8px; }
+ .browse .bl { font-size:.74rem; color:var(--muted); min-width:78px; }
+ .browse button, .browse .eg { font:inherit; font-size:.8rem; padding:4px 11px;
+                  border:1px solid var(--line);
+                  background:#fff; border-radius:999px; cursor:pointer; color:#333;
+                  text-decoration:none; }
+ .browse button:hover, .browse .eg:hover { background:var(--hi); }
+ .browse button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+ #blist { display:none; border:1px solid var(--line); border-radius:10px; padding:10px 12px;
+          margin-bottom:12px; background:#fafbfc; }
+ #blist.on { display:block; }
+ .grp { font-size:.72rem; color:var(--muted); margin:8px 0 1px; padding:3px 8px 3px 10px;
+        background:#f1f3f5; border-radius:4px; display:flex; align-items:center; gap:10px; }
+ .grp:first-child { margin-top:0; }
+ #blist .opts { max-height:52vh; }
+
+ /* 選択中の操作（鎖の上。何か選んでいるときだけ出す） */
+ .bar { display:none; align-items:center; gap:8px; margin:12px 0 -2px; }
+ .bar.on { display:flex; }
+ .bar .lbl { font-size:.78rem; color:var(--muted); min-width:0; white-space:nowrap;
+             overflow:hidden; text-overflow:ellipsis; }
+ .bar button { font:inherit; font-size:.78rem; padding:4px 12px; border-radius:999px;
+               border:1px solid var(--line); background:#fff; cursor:pointer; color:#333;
+               white-space:nowrap; }
+ .bar button:hover { background:var(--hi); }
+ .bar #reset { margin-left:auto; border-color:var(--accent); color:var(--accent);
+               font-weight:600; }
+ .bar #reset:hover { background:var(--accent); color:#fff; }
+
+ /* 鎖 */
+ .chain { border:1px solid var(--line); border-radius:10px; overflow:hidden; margin-top:10px; }
+ .row { display:flex; align-items:center; gap:12px; padding:11px 14px; cursor:pointer;
+        border-top:1px solid var(--line); background:#fff;
+        border-left:3px solid transparent; }
+ .row:first-child { border-top:none; }
+ .row:hover { background:var(--hi); }
+ .row.empty { color:var(--muted); }
+ .row .lbl { min-width:118px; font-size:.74rem; color:var(--muted); flex:none; }
+ .row .val { flex:1; min-width:0; }
+ .row .val b { font-weight:600; font-size:.94rem; }
+ .row .val .sub { display:block; font-size:.76rem; color:var(--muted); white-space:nowrap;
+                  overflow:hidden; text-overflow:ellipsis; }
+ .row .side { flex:none; display:flex; align-items:center; gap:10px; }
+ .row .alt { font:inherit; font-size:.74rem; color:#333; border:1px solid var(--line);
+             border-radius:5px; padding:2px 8px; background:#fff; white-space:nowrap; }
+ .row .alt:hover { background:var(--accent); border-color:var(--accent); color:#fff; }
+ .row .ask { color:var(--accent); font-weight:600; }
+ .row.want { background:#fffdf3; }
+ /* 図が ADaM から直接描かれるとき、ADaM・解析・図表の3段に同じ縦線を通す。線が途切れないので
+    鎖が切れたのではないと分かり、間の解析の段は背景と薄字で「通っていない」ことを示す */
+ .row.direct, .row.skip { border-left:3px solid var(--accent); }
+ .row.skip { background:#f4f6f8; }
+ .row.skip .val b { font-weight:400; }
+ .row .more { font-size:.74rem; color:var(--accent); border:1px solid var(--line);
+              border-radius:5px; padding:2px 8px; background:#fff; }
+ .row .more.on { background:var(--hi); border-color:var(--accent); }
+ .row .ext, .opt .ext, .grp .ext, .whole .ext { font-size:.74rem;
+             border:1px solid var(--accent);
+             border-radius:5px;
+             padding:2px 9px; background:var(--accent); color:#fff; text-decoration:none;
+             white-space:nowrap; font-weight:600; }
+ .row .ext:hover, .opt .ext:hover, .grp .ext:hover, .whole .ext:hover { background:#00376e; }
+ .opt .ext { margin-left:auto; font-weight:400; }
+ .grp .ext { margin-left:auto; font-weight:400; }
+ .row.sel .val b { color:var(--accent); }
+
+ /* 引き出し */
+ .drawer { border-top:1px solid var(--line); background:#fafbfc; padding:10px 14px 12px; }
+ .drawer .filter { width:100%; font:inherit; font-size:.88rem; padding:7px 10px; margin-bottom:8px;
+                   border:1px solid var(--line); border-radius:6px; }
+ .opts { max-height:44vh; overflow-y:auto; margin:0 -4px; }
+ .opt { padding:4px 10px; border-radius:6px; cursor:pointer; display:flex; gap:10px;
+        align-items:baseline; }
+ .opt:hover { background:var(--hi); }
+ .opt.on { background:#e8f0fa; font-weight:600; }
+ .opt .sub { font-size:.76rem; color:var(--muted); font-weight:400; }
+ .opt .sub2 { margin-left:auto; font-size:.72rem; color:var(--muted); font-weight:400; }
+
+ dl.kv { display:grid; grid-template-columns:max-content 1fr; gap:3px 14px; margin:0; }
+ dl.kv dt { font-size:.74rem; color:var(--muted); }
+ dl.kv dd { margin:0; font-size:.85rem; min-width:0; word-break:break-word; }
+ code { background:#eef0f2; padding:1px 5px; border-radius:4px; font-size:.86em;
+        font-family:ui-monospace,Menlo,Consolas,monospace; }
+ .cond { background:#e8f0fa; border-radius:4px; padding:1px 6px; font-size:.8rem;
+         font-family:ui-monospace,Menlo,Consolas,monospace; }
+ table { border-collapse:collapse; width:100%; font-size:.8rem; margin-top:6px; }
+ th, td { border:1px solid var(--line); padding:3px 7px; text-align:left; }
+ th { background:#f1f3f5; font-weight:600; white-space:nowrap; }
+ tr.hi td { background:#fffdf3; font-weight:600; }
+ .scroll { overflow-x:auto; max-height:40vh; overflow-y:auto; }
+ .muted { color:var(--muted); font-size:.78rem; }
+ .why { font-size:.74rem; color:var(--muted); margin-top:8px; }
+
+ footer { max-width:900px; margin:22px auto 0; padding:12px 20px 0; border-top:1px solid var(--line);
+          display:flex; gap:16px; flex-wrap:wrap; font-size:.78rem; color:var(--muted); }
+ footer a { font-size:.78rem; }
+</style>
+</head>
+<body>
+<header><div class="in">
+  <h1>__TRIAL__ トレーサビリティ索引</h1>
+  <span id="whole" class="whole"></span>
+  <span class="flow">図表の項目から CRF の入力欄まで、どちらの向きでも由来をたどれる</span>
+</div></header>
+
+<main>
+  <div class="find">
+    <input id="q" placeholder="項目名・変数名・表番号で探す（例 白血球数、LBORRES、5.4.1）"
+           autocomplete="off">
+    <div id="hits" class="hits"></div>
+  </div>
+  <div class="browse">
+    <span class="bl">例で見る</span>
+    <a id="ex1" class="eg">性別</a>
+    <a id="ex2" class="eg">幹細胞源</a>
+    <a id="ex3" class="eg">ドナー情報</a>
+    <a id="ex4" class="eg">糖尿病の治療</a>
+    <a id="ex5" class="eg">EFS の表</a>
+  </div>
+  <div class="browse">
+    <span class="bl">一覧から選ぶ</span>
+    <span id="btabs"></span>
+  </div>
+  <div id="blist"></div>
+  <div id="bar" class="bar">
+    <span id="barlbl" class="lbl"></span>
+    <button id="reset">最初から選び直す</button>
+    <button id="copy">経路をコピー</button>
+  </div>
+  <div id="chain" class="chain"></div>
+</main>
+
+<footer>
+  <span>生成 __GEN__</span>
+</footer>
+
+<script>
+const D = __DATA__;
+const esc = s => (s == null ? '' : String(s)).replace(/[&<>"]/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const el = id => document.getElementById(id);
+
+/* ====================== 索引（ノードとエッジ） ====================== */
+const N = new Map();
+const add = n => { N.set(n.id, n); return n; };
+const SH = new Map(), FLD = new Map();
+D.sheets.forEach((s, i) => { s.seq = i + 1; SH.set(s.slug, s);
+  add({id: 'sheet:' + s.slug, t: 'sheet', o: s}); });
+D.fields.forEach(f => { const id = 'fld:' + f.sl + '#' + f.fid; FLD.set(id, f);
+  add({id: id, t: 'field', o: f}); });
+const recId = r => 'rec:' + r.sl + '#' + r.ds + '#' + r.lab;
+D.recs.forEach(r => add({id: recId(r), t: 'rec', o: r}));
+D.sdtm.forEach(v => add({id: 'sdtm:' + v.ds + '.' + v.v, t: 'sdtm', o: v}));
+D.pv.forEach(v => add({id: 'pv:' + v.ds + '.' + v.v, t: 'pv', o: v}));
+D.adam.forEach(v => add({id: 'adam:' + v.ds + '.' + v.v, t: 'adam', o: v}));
+D.an.forEach(a => add({id: 'an:' + a.id, t: 'an', o: a}));
+D.disp.forEach(d => add({id: 'out:' + d.id, t: 'out', o: d}));
+
+const UP = new Map(), DN = new Map();
+function link(a, b, why, cond) {
+  if (!N.has(a) || !N.has(b)) return;
+  (DN.has(a) ? DN : DN.set(a, []) && DN).get(a).push({to: b, why: why, cond: cond});
+  (UP.has(b) ? UP : UP.set(b, []) && UP).get(b).push({to: a, why: why, cond: cond});
+}
+const PVDS = {};
+D.pv.forEach(x => { PVDS[x.ds] = 1; });
+function recCond(r) {
+  const c = r.cond.map(([v, val]) => v + "='" + val + "'");
+  if ((D.spid[r.ds] || []).indexOf(r.sl) >= 0) c.push(r.ds + "SPID='" + r.sl + "'");
+  return c.join(' and ');
+}
+D.fields.forEach(f => { if (f.kind === 'article' || f.kind === 'reference')
+  link('sheet:' + f.sl, 'fld:' + f.sl + '#' + f.fid, 'Ptosh の定義（帳票の欄）'); });
+D.recs.forEach(r => {
+  const rid = recId(r), cond = recCond(r);
+  link('sheet:' + r.sl, rid, 'Ptosh の定義（この帳票が作るレコード）');
+  r.inp.forEach(([v, fld]) => link('fld:' + r.sl + '#' + fld, rid,
+    'Ptosh の定義（この欄の値が ' + v + ' に入る）'));
+  r.inp.map(x => [x[0], 1]).concat(r.fix.map(x => [x[0], 0])).forEach(([v, isin]) =>
+    link(rid, (PVDS[r.ds] ? 'pv:' : 'sdtm:') + r.ds + '.' + v,
+         isin ? 'Ptosh の定義（入力から入る変数）' : 'Ptosh の定義（固定値の変数）', cond));
+});
+// SDTM の内部（--ORRES → 標準単位）。ADaM は後者を参照するのでこの1段が要る
+const STD = {ORRES: ['STRESC', 'STRESN'], ORRESU: ['STRESU'], ORNRLO: ['STNRLO'],
+             ORNRHI: ['STNRHI']};
+D.sdtm.forEach(v => {
+  const suf = Object.keys(STD).find(s => v.v === v.ds + s);
+  if (suf) STD[suf].forEach(t => link('sdtm:' + v.ds + '.' + v.v,
+    'sdtm:' + v.ds + '.' + v.ds + t, 'SDTM の標準構造（標準単位へ写した値）'));
+});
+D.adam.forEach(v => (v.pre || []).forEach(p => ['sdtm:', 'adam:', 'pv:'].forEach(pre => {
+  if (N.has(pre + p)) link(pre + p, 'adam:' + v.ds + '.' + v.v, 'variable-map（predecessor）');
+})));
+const adamByName = new Map();
+D.adam.forEach(v => { if (!adamByName.has(v.v)) adamByName.set(v.v, []);
+  adamByName.get(v.v).push(v); });
+D.an.forEach(a => {
+  // ARD の由来列（src_data・src_var）が ADaM を直に指す解析は、絞り込みごと確定で結ぶ。
+  // 由来が作業データセット（_ae73 等）を指す解析は ARD からその1段を辿れないため、
+  // 従来どおり変数名の一致で結んで暫定と表示する
+  const srcw = (a.srcw || []).join(' / ');
+  let hasSrc = false;
+  (a.srcds || []).forEach(ds => (a.srcv || []).forEach(nm => {
+    if (!N.has('adam:' + ds + '.' + nm)) return;
+    hasSrc = true;
+    link('adam:' + ds + '.' + nm, 'an:' + a.id, 'ard_ops の由来列（data=・var=）', srcw);
+  }));
+  // data= が作業データセットのときは ARD.sas の作成手順から ADaM を辿った結果を使う。
+  // どの ADaM かは由来列の変数名で絞る（作業データセットが複数の ADaM を束ねるため）
+  if (!hasSrc) (a.srcvia || []).forEach(ds => (a.srcv || []).forEach(nm => {
+    if (!N.has('adam:' + ds + '.' + nm)) return;
+    hasSrc = true;
+    link('adam:' + ds + '.' + nm, 'an:' + a.id,
+         'ARD.sas の作成手順（' + (a.srcwds || []).join('・') + ' 経由）', srcw);
+  }));
+  if (!hasSrc) (a.vars || []).forEach(nm => (adamByName.get(nm) || []).forEach(v =>
+    link('adam:' + v.ds + '.' + v.v, 'an:' + a.id, '変数名の一致（暫定）')));
+  // 解析項目が ADaM の行を識別する値（PARAMCD='EFS'・AETERM='Abdominal pain' など）と
+  // 一致するときは、その行の解析値の変数へ結ぶ。対応表は持たず実値の一致で決める
+  (a.vars || []).forEach(nm => Object.keys(D.items || {}).forEach(ds => {
+    const it = D.items[ds];
+    Object.keys(it.v).forEach(col => {
+      if (it.v[col].indexOf(nm) < 0) return;
+      const cond = col + "='" + nm + "'";
+      (it.tg.length ? it.tg : [col]).forEach(t =>
+        link('adam:' + ds + '.' + t, 'an:' + a.id, col + ' の実値と一致（暫定）', cond));
+    });
+  }));
+  [[a.aset, '解析対象集団'], [a.sub, '部分集団']].forEach(([sx, w]) => {
+    if (sx && N.has('adam:ADSL.' + sx + 'FL'))
+      link('adam:ADSL.' + sx + 'FL', 'an:' + a.id, 'ADSL のフラグ（' + w + '）');
+  });
+});
+const anByOut = new Map();
+D.an.forEach(a => { if (!anByOut.has(a.out)) anByOut.set(a.out, []); anByOut.get(a.out).push(a); });
+D.disp.forEach(d => {
+  if (d.an) link('an:' + d.an, 'out:' + d.id, 'TLF.sas L' + d.line);
+  else if (d.oid) (anByOut.get(d.oid) || []).forEach(a =>
+    link('an:' + a.id, 'out:' + d.id, 'TLF.sas L' + d.line + '（' + d.oid + ' 一括）'));
+  if (d.paramcd) ['AVAL', 'CNSR'].forEach(v => link('adam:ADTTE.' + v, 'out:' + d.id,
+    'TLF.sas L' + d.line + "（PARAMCD='" + d.paramcd + "'）"));
+  // KM の図は解析IDを持たず ADTTE から直接曲線を描くため、上の3行だけでは解析(ARD)の段を
+  // 飛ばして ADaM に繋がる。図の表番号が指す解析グループ（F_5_4_1 なら Out-5.4.1）の中で
+  // 同じ PARAMCD を扱う解析だけを結ぶ。曲線と表の推定値は同じ計算なので、図から数値の
+  // 根拠へ辿れるようにする。描画の由来ではないので根拠の文にそう書く
+  if (d.paramcd && !d.an && !d.oid) {
+    const oid = 'Out-' + d.id.replace(/^[TF]_/, '').replace(/_/g, '.');
+    (anByOut.get(oid) || []).filter(a => (a.vars || []).indexOf(d.paramcd) >= 0)
+      .forEach(a => link('an:' + a.id, 'out:' + d.id,
+        "PARAMCD='" + d.paramcd + "' が同じ解析（図は ADTTE から描画。同じ推定値）"));
+  }
+});
+
+/* ====================== 段（レイヤ） ====================== */
+const LAYERS = [
+  {k: 'sheet', n: 'CRF 帳票'},
+  {k: 'field', n: 'CRF 入力欄'},
+  {k: 'rec',   n: 'SDTM レコード'},
+  {k: 'sdtm',  n: 'SDTM 変数'},
+  {k: 'adam',  n: 'ADaM 変数'},
+  {k: 'an',    n: '解析結果(ARD)'},
+  {k: 'out',   n: '図表(TLF)'},
+];
+const LIX = {};
+LAYERS.forEach((l, i) => { LIX[l.k] = i; });
+const lay = id => { const t = N.get(id).t; return t === 'pv' ? 'sdtm' : t; };
+
+function nm(e) { return e ? (e.ja || e.en || '') : ''; }
+function lvName(id) { const t = nm(D.lv[id] || D.it[id]); return t || id; }
+// 段ごとの見出しと補足（1行で読めるものにする）
+function name1(id) {
+  const n = N.get(id), o = n.o;
+  switch (n.t) {
+    case 'sheet': return o.name;
+    case 'field': return o.lab || o.fid;
+    case 'rec':   return o.ds + ' ' + o.lab;
+    case 'an':    return o.id;
+    case 'out':   return nm(o.ti) || o.id;
+    default:      return o.ds + '.' + o.v;
+  }
+}
+// 検索の候補に出す補足。入力欄は見出しの無い場所（検索結果・絞り込みの対象文字列）で使うので
+// 「どの帳票の欄か」を添える。一覧の行はブロックの見出しが帳票を持つので name2 を使う
+function listSub(id) {
+  const n = N.get(id), o = n.o;
+  if (n.t !== 'field') return name2(id);
+  const sh = (SH.get(o.sl) || {}).name || o.sl;
+  return sh + (o.v ? '　' + o.ds + '.' + o.v : '　SDTM へ出ない');
+}
+function name2(id) {
+  const n = N.get(id), o = n.o;
+  switch (n.t) {
+    case 'sheet': return o.slug;
+    case 'field': return o.v ? o.ds + '.' + o.v : (o.kind === 'article' ? 'SDTM へ出ない' : '');
+    case 'rec':   return ((SH.get(o.sl) || {}).name || o.sl) +
+                         (recCond(o) ? '　' + recCond(o) : '');
+    case 'an':    return o.mth + (o.aset ? '　' + o.aset : '') + (o.sub ? ' / ' + o.sub : '');
+    case 'out':   return o.id + (o.kind === 'figure' ? '　図' : '');
+    default:      return o.lab;
+  }
+}
+
+/* 段の候補。前後で選ばれているものから辿れるものだけに絞る */
+function reachable(from, dirMap, targetLayer) {
+  const seen = new Set([from]), out = [], st = [from];
+  while (st.length) {
+    const c = st.pop();
+    (dirMap.get(c) || []).forEach(e => {
+      if (seen.has(e.to)) return;
+      seen.add(e.to);
+      if (lay(e.to) === targetLayer) out.push({id: e.to, from: c, why: e.why, cond: e.cond});
+      else st.push(e.to);
+    });
+  }
+  return out;
+}
+const ALL = {};
+LAYERS.forEach(l => { ALL[l.k] = []; });
+N.forEach(n => ALL[lay(n.id)].push(n.id));
+ALL.field = ALL.field.filter(id => {
+  const k = N.get(id).o.kind; return k === 'article' || k === 'reference';
+});
+ALL.sheet.sort((a, b) => (N.get(a).o.seq || 0) - (N.get(b).o.seq || 0));
+// 入力欄は帳票ごと、さらに SDTM レコードごとに固まる順にする（一覧で区切りを入れるため）
+ALL.field.sort((a, b) => {
+  const x = N.get(a).o, y = N.get(b).o;
+  return (SH.get(x.sl).seq - SH.get(y.sl).seq) ||
+    (x.ds || '').localeCompare(y.ds || '') ||
+    (x.rec || '').localeCompare(y.rec || '') || (x.seq - y.seq);
+});
+['rec', 'sdtm', 'adam'].forEach(k => ALL[k].sort((a, b) => {
+  const x = N.get(a).o, y = N.get(b).o;
+  return x.ds.localeCompare(y.ds) || (x.v || x.lab || '').localeCompare(y.v || y.lab || '');
+}));
+ALL.an.sort((a, b) => chapKey('out:' + N.get(a).o.out.replace('Out-', 'T_').replace(/\./g, '_'))
+  .localeCompare(chapKey('out:' + N.get(b).o.out.replace('Out-', 'T_').replace(/\./g, '_'))) ||
+  N.get(a).o.id.localeCompare(N.get(b).o.id));
+function chapKey(id) {
+  return id.replace(/^out:[TF]_/, '').split('_')
+    .map(x => (isNaN(parseInt(x, 10)) ? x : String(parseInt(x, 10)).padStart(4, '0'))).join('.');
+}
+ALL.out.sort((a, b) => chapKey(a).localeCompare(chapKey(b)));
+const ORD = new Map();
+LAYERS.forEach(l => ALL[l.k].forEach((id, i) => ORD.set(id, i)));
+const byOrd = (a, b) => (ORD.get(a.id) === undefined ? 1e9 : ORD.get(a.id)) -
+                        (ORD.get(b.id) === undefined ? 1e9 : ORD.get(b.id));
+
+let chain = {};          // 段 → 選んだノードの配列（同じ段を経由するときは複数）
+// 引き出しは2種類あり、開き方を変える。詳細（det）は段ごとに開いたままにできる（全体を並べて
+// 読み比べるため）。一覧（pick）は選ぶための場所なので同時に1つだけ開く。
+let openDet = new Set();
+let openPick = null;
+
+function anchor(k, dir) {   // dir=-1 で左、+1 で右の最も近い選択済みノード
+  for (let i = LIX[k] + dir; i >= 0 && i < LAYERS.length; i += dir) {
+    const a = chain[LAYERS[i].k];
+    if (a && a.length) return {k: LAYERS[i].k, id: dir < 0 ? a[a.length - 1] : a[0]};
+  }
+  return null;
+}
+// KM の図は ADTTE から直接曲線を描き、ARD の結果値を通らない。この図を見ているときに
+// 解析(ARD)の段を空欄や「たどれない」で見せると追跡が切れているように読めるので、
+// 経由しないことと ADaM から図表へ直結していることを画面で言う
+function bypassAn() {
+  const a = chain.out || [];
+  return !!(a.length && (N.get(a[0]).o || {}).direct);
+}
+function cands(k) {
+  // 前後で選ばれているものから辿れるものだけ。辿れなければ空にする（全件へ落とすと
+  // 無関係なものが鎖に入り、何を見ているのか分からなくなる）
+  const L = anchor(k, -1);
+  if (L) return reachable(L.id, DN, k).sort(byOrd);
+  const R = anchor(k, +1);
+  if (R) return reachable(R.id, UP, k).sort(byOrd);
+  return ALL[k].map(id => ({id: id}));
+}
+/* 段の代表を1つ選ぶ。鎖は必ず端まで埋める（空の段があると何を見ているのか分からなくなる）。
+   ほかの候補があることは行の「他 N ▾」で示し、押せば選び直せる。 */
+// AVAL のような汎用の変数名は、解析側が名指ししていても結び付きの根拠にならない
+// （An-5.3.1-01 の解析項目は `AVAL` で、どの ADLB.AVAL の行の話かを示していない）
+const GENERIC = {AVAL: 1, AVALC: 1, CNSR: 1, ATOXGR: 1, PARAMCD: 1};
+// 解析値が入る列。値レベルの条件（PARAMCD='WBC' など）で行が決まるとき、その値の行き先はここ
+const VALCOL = {AVAL: 1, AVALC: 1, CNSR: 1, ATOXGR: 1};
+function best(k, c, dir) {
+  if (c.length === 1) return c[0];
+  if (k === 'adam') {
+    // いま辿っている値で行の位置が決まり、かつ解析値が入る列（AVAL 等）があるなら、その中から
+    // 選ぶ。同じデータセットの修飾変数（MRCAT 等）は値の行き先ではないので外す
+    const C = condNow();
+    const ev = c.filter(x => locate(x.id, C) && VALCOL[N.get(x.id).o.v]);
+    if (ev.length) c = ev;
+    if (c.length === 1) return c[0];
+  }
+  // いま辿っている値（レコードの固定値 LBTESTCD='BLASTLE' など）を文脈として使う
+  const ctx = new Set(Object.values(condNow()));
+  const sc = x => {
+    const o = N.get(x.id).o;
+    let s = 0;
+    // 行き止まりより、先へ続く候補を選ぶ
+    if (((dir < 0 ? UP : DN).get(x.id) || []).length) s += 3;
+    if (k === 'sdtm' || k === 'pv') {
+      // いま辿っている入力欄が入る変数が主役
+      const f = (chain.field || [])[0], fo = f && N.get(f).o;
+      if (fo && fo.v === o.v && fo.ds === o.ds) s += 5;
+      if (/ORRES$/.test(o.v)) s += 2;
+      if (/(TESTCD|CAT|SPEC|STAT|BLFL|DTC|VISITNUM|SPID)$/.test(o.v)) s -= 1;
+    } else if (k === 'adam') {
+      const src = (chain.sdtm || chain.rec || [])[0], dom = src && N.get(src).o.ds;
+      if (['AVAL', 'AVALC', 'CNSR', 'ATOXGR'].indexOf(o.v) >= 0) s += 3;
+      if (locate(x.id, condNow())) s += 4;      // いま辿っている値で行が決まるもの
+      if (dir > 0) {
+        // 下へ辿るときは、その変数を名指しで解析しているものへ繋がる候補を優先する。
+        // ADLB.AVAL のような汎用の変数は30の解析へ繋がり、どれを選んでも当てにならないが、
+        // ADSL.WBCBL のような固有の変数は解析側が変数名で名指ししている
+        const ans = reachable(x.id, DN, 'an');
+        if (!GENERIC[o.v] && ans.some(a => (N.get(a.id).o.vars || []).indexOf(o.v) >= 0)) s += 8;
+        else if (ans.some(a => { const m = a.cond && /='(.*)'$/.exec(a.cond);
+                                 return m && ctx.has(m[1]); })) s += 8;
+        if (ans.length && ans.length <= 6) s += 2;
+        else if (ans.length > 20) s -= 2;
+      }
+      if (dom && o.ds === 'AD' + dom) s += 2;
+      if (/FL$/.test(o.v)) s -= 2;
+      if ((x.why || '').indexOf('フラグ') >= 0) s -= 3;
+    } else if (k === 'an') {
+      // その値を解析している解析を選ぶ（ADLB.AVAL からは30の解析へ行けるが、
+      // いま辿っているのが BLASTLE なら BLASTLE を解析しているものが答え）
+      if (x.cond) { const m = /='(.*)'$/.exec(x.cond); if (m && ctx.has(m[1])) s += 6; }
+      if ((N.get(x.id).o.vars || []).some(v => ctx.has(v))) s += 6;
+      // いま選ばれている ADaM 変数を解析対象にしている解析
+      const av = (chain.adam || []).map(i => N.get(i).o.v).filter(v => !GENERIC[v]);
+      if ((N.get(x.id).o.vars || []).some(v => av.indexOf(v) >= 0)) s += 6;
+      if ((x.why || '').indexOf('一致') >= 0) s += 2;
+      if ((x.why || '').indexOf('フラグ') >= 0) s -= 3;
+    } else if (k === 'field') {
+      // レコードの入力欄のうち、いま辿っている変数に入るもの
+      const r = (chain.rec || [])[0], ro = r && N.get(r).o;
+      const v = (chain.sdtm || [])[0] && N.get(chain.sdtm[0]).o.v;
+      if (ro && v && (ro.inp || []).some(t => t[0] === v && t[1] === o.fid)) s += 5;
+      if (o.kind === 'article') s += 1;
+    }
+    return s;
+  };
+  const ranked = c.slice().sort((a, b) => sc(b) - sc(a));
+  // ADaM と解析は、いま辿っている値との結び付きが示せないと当てにならない。
+  // 結び付きの根拠が無いまま代表として出すときは「仮」と印を付ける（黙って出さない）
+  return ranked[0];
+}
+// その候補を「データが決めている」と言えるか。言えないときは代表を作らず選ばせる
+function evidence(k, x) {
+  const o = N.get(x.id).o, ctx = new Set(Object.values(condNow()));
+  if (k === 'sdtm' || k === 'pv') {
+    const f = (chain.field || [])[0], fo = f && N.get(f).o;
+    return !!(fo && fo.v === o.v && fo.ds === o.ds);
+  }
+  if (k === 'field') {
+    const r = (chain.rec || [])[0], ro = r && N.get(r).o;
+    const v = (chain.sdtm || [])[0] && N.get(chain.sdtm[0]).o.v;
+    return !!(ro && v && (ro.inp || []).some(t => t[0] === v && t[1] === o.fid));
+  }
+  if (k === 'adam') {
+    const C = condNow();
+    // 解析側が値で名指ししている（PARAMCD='EFS' の実値一致で結んだ）もの
+    if ((x.why || '').indexOf('実値と一致') >= 0) return true;
+    // 図が ADaM から直接曲線を描くとき、図の宣言が PARAMCD で名指ししている変数は決まっている
+    if (bypassAn() && (x.why || '').indexOf("PARAMCD='") >= 0) return true;
+    if (locate(x.id, C) && VALCOL[o.v]) return true;             // 値の行き先が決まる
+    if ((chain.sdtm || []).map(i => N.get(i).o.v).indexOf(o.v) >= 0) return true;  // 同名の転記
+    // 値レベルの条件が無い経路（DM のように1被験者1レコード）なら、解析側の名指しで足りる
+    return !Object.keys(C).length && !GENERIC[o.v] &&
+      reachable(x.id, DN, 'an').some(a => (N.get(a.id).o.vars || []).indexOf(o.v) >= 0);
+  }
+  if (k === 'an') {
+    if ((o.vars || []).some(v => ctx.has(v))) return true;
+    if (x.cond) { const m = /='(.*)'$/.exec(x.cond); if (m && ctx.has(m[1])) return true; }
+    const av = (chain.adam || []).map(i => N.get(i).o.v).filter(v => !GENERIC[v]);
+    return (o.vars || []).some(v => av.indexOf(v) >= 0);
+  }
+  return true;
+}
+/* 選び直したら前後を埋める。1つに決まる段は自動で選び、複数なら止める */
+// 鎖を両方向へ伸ばす。データが決めている段は自動で選び、決まらない段は選ばせて止まる
+let ask = null;                // 選んでほしい段（そこの一覧を開く）
+function fill(k) {
+  ask = null;
+  for (const dir of [1, -1]) {
+    for (let i = LIX[k] + dir; i >= 0 && i < LAYERS.length; i += dir) {
+      const key = LAYERS[i].k;
+      if (chain[key]) continue;
+      if (key === 'an' && bypassAn()) continue;   // 図が直接描くので解析の段は通らない
+      const c = cands(key);
+      if (!c.length) break;                       // たどれない
+      const p = best(key, c, dir);
+      if (c.length > 1 && !evidence(key, p)) {    // 決まらない。ここで選んでもらう
+        if (!ask || dir === 1) ask = key;
+        break;
+      }
+      chain[key] = [p.id];
+      const via = p.from, vk = via && lay(via);
+      if (vk && vk !== key && chain[vk] && chain[vk].indexOf(via) < 0) chain[vk].push(via);
+    }
+  }
+}
+function pick(id) {            // 検索から選んだとき。鎖を作り直す
+  const k = lay(id);
+  chain = {};
+  chain[k] = [id];
+  fill(k);
+  after(id);
+}
+function pickIn(k, id) {       // 段の引き出しから選び直したとき。前後の段は残す
+  chain[k] = [id];
+  // 選んだものから辿れなくなった段だけを外す。上流も下流も同じ扱いにする（下流を一律に
+  // 消すと、図表を選んで上流を絞り込む途中でその図表の選択が消え、何を追っていたか分からなくなる）
+  for (const [dir, way] of [[-1, DN], [1, UP]]) {
+    for (let i = LIX[k] + dir; i >= 0 && i < LAYERS.length; i += dir) {
+      const key = LAYERS[i].k;
+      if (chain[key] && !reachable(chain[key][0], way, k).some(x => x.id === id))
+        delete chain[key];
+    }
+  }
+  fill(k);
+  after(id);
+}
+let cur = null;                // いま見ているノード。自分で書いた hash に反応しないため
+function after(id) {
+  openPick = ask || null;        // 決まらない段があれば、その一覧を開いて待つ
+  if (ask) openDet.delete(ask);  // 同じ段では引き出しは1つしか置けない
+  openDet.forEach(k => { if (!chain[k]) openDet.delete(k); });   // 選択が消えた段の詳細は畳む
+  cur = id;
+  location.hash = 'n=' + encodeURIComponent(id);
+  draw();
+}
+
+/* ====================== 画面 ====================== */
+function rowHTML(l, i) {
+  const a = chain[l.k] || [], c = cands(l.k);
+  // 図が ADaM から直接描かれるときは、解析の段を迂回として見せ、その上下（ADaM と図表）に
+  // 直結の印を付ける。3つの段が一続きに見えるので、鎖が切れたのではないと分かる
+  const byp = bypassAn(), skip = byp && l.k === 'an';
+  const dir = byp && (l.k === 'adam' || l.k === 'out');
+  let val, sub = '';
+  if (skip) {
+    // 図に直接結んだ解析（表番号と PARAMCD が同じもの）だけを「同じ推定値」として名指しする。
+    // 段を押せば ADaM から辿れる解析の一覧が開くが、それは同じ推定値とは限らないので数えない
+    const se = (UP.get(chain.out[0]) || []).filter(x => lay(x.to) === 'an').map(x => name1(x.to));
+    val = '<span class="muted">経由しない</span>';
+    sub = 'この図は ADaM から直接描く' +
+      (se.length ? '　同じ推定値の解析：' + se.join('・') : '');
+  } else if (a.length) {
+    val = a.map(name1).join(' › ');
+    sub = name2(a[a.length - 1]);
+
+  } else {
+    val = c.length ? '<span class="ask">' + c.length + ' 件から選ぶ</span>'
+                   : '<span class="muted">たどれない</span>';
+  }
+  return '<div class="row' + (a.length ? ' sel' : ' empty') +
+    (ask === l.k && !skip ? ' want' : '') + (skip ? ' skip' : '') + (dir ? ' direct' : '') +
+    '" data-l="' + l.k + '">' +
+    '<div class="lbl">' + l.n + '</div>' +
+    '<div class="val"><b>' + (a.length ? esc(val) : val) + '</b>' +
+    (sub ? '<span class="sub">' + esc(sub) + '</span>' : '') + '</div>' +
+    '<div class="side">' +
+    (c.length > 1 && a.length ? '<button class="alt">他 ' + (c.length - 1) +
+      ' 件に変える</button>' : '') +
+    (a.length ? extLink(a[a.length - 1]) : '') +
+    (a.length ? '<button class="more' + (openDet.has(l.k) ? ' on' : '') + '" data-d="' + l.k +
+      '">詳細</button>' : '') +
+    '</div></div>' +
+    (openPick === l.k ?
+      '<div class="drawer" data-l="' + l.k + '" data-m="pick">' + pickerHTML(l.k, c) + '</div>' :
+     openDet.has(l.k) && a.length ?
+      '<div class="drawer" data-l="' + l.k + '" data-m="det">' +
+      detailHTML(a[a.length - 1], l.k) + '</div>' : '');
+}
+// 帳票・入力欄は aCRF、図表は HTML 版 TLF へ直接開けるようにする（行の中のリンク）
+// リンク先は生成時に実在を確かめた相対パス（o.url）だけを使う。無いものにはリンクを出さない。
+function extLink(id) {
+  const n = N.get(id), o = n.o;
+  if (n.t === 'sheet') return o.url ? extA(o.url, 'aCRF') : '';
+  if (n.t === 'field') {
+    const u = (SH.get(o.sl) || {}).url;
+    return u ? extA(u + '#' + o.fid, 'aCRF') : '';
+  }
+  if (n.t === 'out') return o.url ? extA(o.url, '図表を開く') : '';
+  return '';
+}
+// 仕様書の参照。同梱の HTML があれば節へ直接飛ばす（リンク先は生成時に節の id の実在を
+// 確かめたもの）。無ければ参照の文字列だけを出す
+function specA(o) {
+  const t = '<code>' + esc(o.ref) + '</code>';
+  return o.refurl ? '<a href="' + esc(o.refurl) + '" target="_blank">' + t + '</a>' : t;
+}
+function extA(href, text) {
+  return '<a class="ext" href="' + esc(href) + '" target="_blank" onclick="' +
+    'event.stopPropagation()">' + esc(text) + '</a>';
+}
+function draw() {
+  // 何か選んでいる間だけ、鎖のすぐ上に「最初から選び直す」を出す。途中まで選んだ状態から
+  // 別のものを見たくなったときに、どこを押せば白紙に戻るかが分かるようにするため
+  const some = LAYERS.some(l => chain[l.k]);
+  el('bar').classList.toggle('on', some);
+  el('barlbl').textContent = some && cur && N.has(cur) ? '選択中　' + name1(cur) : '';
+  el('chain').innerHTML = LAYERS.map(rowHTML).join('');
+  el('chain').querySelectorAll('.row').forEach(r => {
+    r.addEventListener('click', e => {
+      const k = r.dataset.l;
+      // 詳細は段ごとに独立して開閉する。一覧はどれか1つだけ開く（同じ行に両方は置けない）
+      if (e.target.classList.contains('more')) {
+        if (openDet.has(k)) openDet.delete(k); else { openDet.add(k); openPick = null; }
+      } else {
+        openPick = openPick === k ? null : k;
+        if (openPick) openDet.delete(k);
+      }
+      draw();
+    });
+  });
+  el('chain').querySelectorAll('.drawer').forEach(d => {
+    d.addEventListener('click', e => e.stopPropagation());
+    if (d.dataset.m !== 'pick') return;
+    const k = d.dataset.l;
+    d.querySelectorAll('.opt').forEach(o =>
+      o.addEventListener('click', () => pickIn(k, o.dataset.id)));
+    const f = d.querySelector('.filter');
+    if (f) {
+      f.addEventListener('input', () => filterList(d, f.value));
+      f.focus();
+    }
+    const on = d.querySelector('.opt.on');   // 選ばれているものが見える位置へ
+    if (on) on.scrollIntoView({block: 'center'});
+  });
+}
+function pickerHTML(k, c) {
+  const cur = (chain[k] || [])[0];
+  let head = null;
+  const list = c.map(x => {
+    const s = (name1(x.id) + ' ' + listSub(x.id)).toLowerCase();
+    let pre = '';
+    if (k === 'field') {                       // SDTM のレコードごとに区切る
+      const h = blockKey(x.id);
+      if (h !== head) { head = h; pre = blockHead(x.id); }
+    }
+    return pre + '<div class="opt' + (x.id === cur ? ' on' : '') + '" data-id="' + esc(x.id) +
+      '" data-s="' + esc(s) + '"><span>' + esc(name1(x.id)) + '</span>' +
+      '<span class="sub">' + esc(k === 'field' ? name2(x.id) : listSub(x.id)) + '</span>' +
+      (k === 'field' ? '' : extLink(x.id)) + '</div>';
+  }).join('');
+  return (c.length > 8 ? '<input class="filter" placeholder="絞り込み（' + c.length +
+            ' 件）">' : '') +
+    '<div class="opts">' + (list || '<p class="muted">候補がありません</p>') +
+    '<p class="muted none" style="display:none">該当なし</p></div>';
+}
+
+/* ---------- 詳細（要るときだけ開く） ---------- */
+function kv(pairs) {
+  const r = pairs.filter(p => p[1] !== '' && p[1] != null)
+    .map(p => '<dt>' + esc(p[0]) + '</dt><dd>' + p[1] + '</dd>').join('');
+  return r ? '<dl class="kv">' + r + '</dl>' : '';
+}
+function whyHTML(k) {
+  // この段が前の段からどうつながっているか（根拠）
+  const a = chain[k]; if (!a) return '';
+  const L = anchor(k, -1); if (!L) return '';
+  const e = (DN.get(L.id) || []).find(x => x.to === a[0]);
+  if (!e) { const r = reachable(L.id, DN, k).find(x => x.id === a[0]);
+    return r ? '<div class="why">根拠 ' + esc(r.why) + '</div>' : ''; }
+  return '<div class="why">根拠 ' + esc(e.why) + '</div>';
+}
+function condNow() {          // 鎖がいま持っている絞り込み。値レベルの条件はレコードが持つ
+  const C = {};
+  (chain.rec || []).forEach(id => recCond(N.get(id).o).split(' and ').forEach(t => {
+    const m = /^([A-Z0-9_]+)='(.*)'$/.exec(t.trim());
+    if (m) C[m[1]] = m[2];
+  }));
+  return C;
+}
+function locate(id, C) {
+  const n = N.get(id), o = n.o, out = [];
+  if (n.t === 'sdtm' || n.t === 'pv') {
+    Object.keys(C).forEach(k => { if (k.indexOf(o.ds) === 0) out.push(k + "='" + C[k] + "'"); });
+  } else if (n.t === 'adam') {
+    const av = D.adamv[o.ds] || {};
+    Object.keys(C).forEach(k => {
+      const v = C[k];
+      if (k.slice(-6) === 'TESTCD' && av.paramcd && av.paramcd[v] !== undefined)
+        out.push("PARAMCD='" + v + "'" + (av.paramcd[v] ? '（' + av.paramcd[v] + '）' : ''));
+      else if (k.slice(-4) === 'SPID' && av.spid)
+        Object.keys(av.spid).forEach(col => {
+          if (av.spid[col].indexOf(v) >= 0) out.push(col + "='" + v + "'");
+        });
+    });
+  }
+  return [...new Set(out)].join(' and ');
+}
+// レコードの中身を1つの表にする。変数・値の出どころ（固定値か入力欄）・入り得る値（CT）
+function recTable(r, hi) {
+  const rows = r.fix.map(([v, val]) => [v, '固定値', esc(val)])
+    .concat(r.inp.map(([v, fld, kind]) => {
+      const f = FLD.get('fld:' + r.sl + '#' + fld) || {};
+      const oc = D.opts[f.opt] || [];
+      const vals = oc.length ? oc.slice(0, 8).map(([c, l]) => '<code>' + esc(c) + '</code>' +
+          (l && l !== c ? ' ' + esc(l) : '')).join('　') +
+          (oc.length > 8 ? ' <span class="muted">ほか ' + (oc.length - 8) + '</span>' : '')
+        : ct(r.ds, v);
+      return [v, (kind === 'reference' ? '参照 ' : '') + esc(f.lab || fld), vals];
+    }));
+  rows.sort((a, b) => a[0].localeCompare(b[0]));
+  return '<div class="scroll"><table><tr><th>変数</th><th>値の出どころ</th>' +
+    '<th>入り得る値</th></tr>' + rows.map(([v, src, vals]) =>
+      '<tr' + (hi && v === hi ? ' class="hi"' : '') + '><td><code>' + esc(v) +
+      '</code></td><td>' + src + '</td><td>' + (vals || '') + '</td></tr>').join('') +
+    '</table></div>';
+}
+function ct(ds, v) {
+  const c = (D.ct || {})[ds + '.' + v];
+  if (!c || !c.items.length) return '';
+  return c.items.slice(0, 8).map(([x, dec]) => '<code>' + esc(x) + '</code>' +
+    (dec ? ' ' + esc(dec) : '')).join('　') +
+    (c.n > 8 ? ' <span class="muted">ほか ' + (c.n - 8) + '</span>' : '');
+}
+function detailHTML(id, k) {
+  const n = N.get(id), o = n.o, C = condNow();
+  let h = '';
+  if (n.t === 'sheet') {
+    const doms = Object.keys(D.spid).filter(d => (D.spid[d] || []).indexOf(o.slug) >= 0);
+    h = kv([['スラッグ', '<code>' + esc(o.slug) + '</code>'],
+            ['入るドメイン', doms.map(d => '<code>' + d + '</code>').join(' ') ||
+              '<span class="muted">--SPID の実値に現れない</span>'],
+            ['aCRF', o.url ? '<a href="' + esc(o.url) + '" target="_blank">帳票を開く</a>' :
+              '<span class="muted">同梱なし</span>']]);
+  } else if (n.t === 'field') {
+    const KN = {article: '施設が入力する欄', assigned: '固定値', reference: '他の帳票からの参照',
+                heading: '見出し', note: '注記'};
+    const oc = D.opts[o.opt] || [];
+    h = kv([['種別', esc(KN[o.kind] || o.kind) + (o.typ ? '　' + esc(o.typ) : '')],
+            ['注記', esc(o.note)],
+            ['固定値', o.val ? '<span class="cond">' + esc(o.val) + '</span>' : ''],
+            ['参照元', o.ref ? '<code>' + esc(o.ref) + '</code>' : ''],
+            ['選択肢', oc.length ? oc.slice(0, 30).map(([c, l]) => '<code>' + esc(c) + '</code>' +
+              (l && l !== c ? ' ' + esc(l) : '')).join('　') +
+              (oc.length > 30 ? ' <span class="muted">ほか ' + (oc.length - 30) + '</span>' : '')
+              : ''],
+            ['入る変数', o.v ? '<code>' + esc(o.ds) + '.' + esc(o.v) + '</code>' :
+              (o.kind === 'article' ? 'なし（SDTM へ出ない）' : '')],
+            ['aCRF', (SH.get(o.sl) || {}).url ?
+              '<a href="' + esc(SH.get(o.sl).url + '#' + o.fid) + '" target="_blank">' +
+              'この欄を aCRF で開く</a>' : '']]);
+    // この欄が入る SDTM レコードの中身（変数・値の出どころ・入り得る値）をその場で見せる
+    const rid = o.rec ? 'rec:' + o.sl + '#' + o.ds + '#' + o.rec : '';
+    if (rid && N.has(rid)) {
+      const r = N.get(rid).o, m = (D.dsmeta || {})[r.ds] || {};
+      h += '<p class="muted" style="margin:10px 0 0">この欄が入るレコード　<code>' +
+        esc(r.ds) + '</code> ' + esc(r.lab) + (m.structure ? '　' + esc(m.structure) : '') +
+        '</p>' + recTable(r, o.v);
+    }
+  } else if (n.t === 'rec') {
+    const m = (D.dsmeta || {})[o.ds] || {};
+    h = kv([['ドメイン', '<code>' + esc(o.ds) + '</code>' + (m.label ? '　' + esc(m.label) : '')],
+            ['レコードの単位', esc(m.structure || '')]]) + recTable(o);
+  } else if (n.t === 'sdtm' || n.t === 'pv' || n.t === 'adam') {
+    const loc = locate(id, C), c = (D.ct || {})[o.ds + '.' + o.v];
+    h = kv([['ラベル', esc(o.lab)], ['由来', esc(o.org)],
+            ['この位置', loc ? '<span class="cond">' + esc(o.ds + '.' + o.v + ' where ' + loc) +
+              '</span>' : ''],
+            ['前の層', (o.pre || []).map(p => '<code>' + esc(p) + '</code>').join(' / ')],
+            ['入り得る値', c ? c.items.slice(0, 24).map(([v, dec]) => '<code>' + esc(v) +
+              '</code>' + (dec ? ' ' + esc(dec) : '')).join('　') +
+              (c.n > 24 ? ' <span class="muted">ほか ' + (c.n - 24) + '</span>' : '') : ''],
+            ['仕様書', specA(o)]]);
+  } else if (n.t === 'an') {
+    h = kv([['手法', '<code>' + esc(o.mth) + '</code>'],
+            ['解析対象集団', esc(o.aset) + (o.sub ? ' / ' + esc(o.sub) : '')],
+            ['群', o.g1l.map(x => esc(lvName(x))).join('　')],
+            ['解析項目', o.vars.map(x => esc(lvName(x))).join('　')],
+            ['解析仕様', specA(o)]]) + ardTable(o.id);
+  } else if (n.t === 'out') {
+    h = kv([['表題', esc(nm(o.ti))], ['英語', esc((o.ti || {}).en)],
+            ['副題', esc(nm(o.su))],
+            ['描画', '<code>' + esc(o.macro) + '</code>　tlf-index.csv seq ' + o.seq],
+            ['絞り込み', o.where ? '<span class="cond">' + esc(o.where) + '</span>' : ''],
+            ['図表', o.url ? '<a href="' + esc(o.url) + '" target="_blank">この図表を開く</a>' :
+              '<span class="muted">同梱なし</span>']]);
+  }
+  return h + whyHTML(k);
+}
+const AC = {}, ARDN = D.ardcols.length ? D.ard[D.ardcols[0]][1].length : 0;
+D.ardcols.forEach(c => { const [u, ix] = D.ard[c]; AC[c] = i => u[ix[i]]; });
+const ardByAn = new Map();
+for (let i = 0; i < ARDN; i++) {
+  const k = AC['analysis_id'](i);
+  if (!ardByAn.has(k)) ardByAn.set(k, []);
+  ardByAn.get(k).push(i);
+}
+// 統計量の表示名。ARD は英語（stat_label）を持つので、カタログで日本語へ言い換える
+function statName(i) {
+  const en = AC['stat_label'](i), e = D.stl[en];
+  return (e && nm(e)) || en || AC['stat_name'](i);
+}
+function num(v) {
+  const f = Number(v);
+  if (v === '' || v == null || !isFinite(f) || String(v).length <= 8) return esc(v);
+  return '<span title="' + esc(v) + '">' + esc(String(Math.round(f * 1e4) / 1e4)) + '</span>';
+}
+function ardTable(anid) {
+  const ix = ardByAn.get(anid) || [];
+  if (!ix.length) return '';
+  let h = '<div class="scroll"><table><tr><th>群</th><th>水準</th><th>統計量</th><th>値</th></tr>';
+  ix.slice(0, 100).forEach(i => {
+    h += '<tr><td>' + esc(lvName(AC['group1_level'](i))) + '</td><td>' +
+      esc(lvName(AC['variable_level'](i))) + '</td><td>' + esc(statName(i)) + '</td><td>' +
+      num(AC['stat_type'](i) === 'char' ? AC['stat_char'](i) : AC['stat_num'](i)) + '</td></tr>';
+  });
+  return h + '</table></div>' + (ix.length > 100 ?
+    '<p class="muted">先頭 100 行（全 ' + ix.length + ' 行）</p>' : '');
+}
+
+/* 一覧の絞り込み。該当が無くなった区切りは消す（空の見出しだけが並ぶのを避ける） */
+function filterList(box, val) {
+  const q = val.trim().toLowerCase();
+  let n = 0;
+  box.querySelectorAll('.opt').forEach(o => {
+    const hit = !q || o.dataset.s.indexOf(q) >= 0;
+    o.style.display = hit ? '' : 'none';
+    if (hit) n++;
+  });
+  box.querySelectorAll('.grp').forEach(gr => {
+    let any = false;
+    for (let e = gr.nextElementSibling; e && !e.classList.contains('grp');
+         e = e.nextElementSibling) {
+      if (e.classList.contains('opt') && e.style.display !== 'none') { any = true; break; }
+    }
+    gr.style.display = any ? '' : 'none';
+  });
+  const none = box.querySelector('.none');
+  if (none) none.style.display = n ? 'none' : '';
+}
+
+/* ====================== 一覧から選ぶ ====================== */
+// 段を選び、その段の一覧から要素を選ぶ。要素を選ぶと鎖が端まで埋まる。
+// 一覧は段ごとに自然な単位でまとめる（入力欄は帳票ごと、変数はデータセットごと、など）。
+// 入力欄はブロック（SDTM レコード）で区切る。区切りと見出しは blockKey・blockHead が持つ
+const GROUPER = {
+  sheet: () => null,
+  rec:   id => N.get(id).o.ds,
+  sdtm:  id => N.get(id).o.ds,
+  adam:  id => N.get(id).o.ds,
+  an:    id => N.get(id).o.out,
+  out:   () => null,
+};
+// 入力欄の一覧に入れる区切り。SDTM のレコード単位で分ける（1帳票が何レコードにも分かれる）
+function recHead(id) {
+  const o = N.get(id).o;
+  if (!o.rec) return o.kind === 'article' ? 'SDTM へ出ない欄' : '';
+  const rid = 'rec:' + o.sl + '#' + o.ds + '#' + o.rec, r = N.has(rid) ? N.get(rid).o : null;
+  // 区切りは短くする。何のレコードかが分かる条件（--TESTCD・--OBJ・--TRT 等）だけを出し、
+  // 分類・検体・--SPID は長くなるだけなのでレコードの詳細に任せる
+  const key = (r ? r.cond : []).filter(([v]) =>
+    /(TESTCD|OBJ|TRT|TERM|DECOD|PARMCD)$/.test(v)).map(([v, x]) => v + "='" + x + "'");
+  return o.ds + ' ' + o.rec + (key.length ? '　' + key.join(' ') : '');
+}
+// ブロックの実体。SDTM レコードは（帳票スラッグ・レコード名・ドメイン）の組で作られるので、
+// 1ブロックは必ず1帳票の中で閉じる。見出しの文字列は帳票をまたいで同じになり得る
+// （RS 005 RSTESTCD='HEMARESP' が寛解導入と強化地固めの両方にある等）ため、区切りは
+// 文字列ではなくこのキーで判定する
+function blockKey(id) {
+  const o = N.get(id).o;
+  return o.rec ? 'rec:' + o.sl + '#' + o.ds + '#' + o.rec : 'nosdtm:' + o.sl;
+}
+// ブロックの見出し。中の欄はすべて同じ帳票の欄なので、aCRF は欄ごとに並べずここに1つ置く。
+// リンク先はブロックの先頭の欄のアンカーにして、帳票のその位置が開くようにする
+function blockHead(id) {
+  const o = N.get(id).o, sh = SH.get(o.sl) || {}, h = recHead(id);
+  return '<div class="grp">' + esc((sh.name || o.sl) + (h ? '　／　' + h : '')) +
+    (sh.url ? extA(sh.url + '#' + o.fid, 'aCRF') : '') + '</div>';
+}
+let bopen = null;
+// SDTM レコードは単体で一覧しても意味が薄い（入力欄から辿って見るもの）ので入口に出さない
+const BROWSE = LAYERS.filter(l => l.k !== 'rec');
+el('btabs').innerHTML = BROWSE.map(l =>
+  '<button data-l="' + l.k + '">' + l.n + '</button>').join('');
+el('btabs').querySelectorAll('button').forEach(btn =>
+  btn.addEventListener('click', () => { bopen = bopen === btn.dataset.l ? null : btn.dataset.l;
+    drawBrowse(); }));
+function drawBrowse() {
+  el('btabs').querySelectorAll('button').forEach(b =>
+    b.classList.toggle('on', b.dataset.l === bopen));
+  const box = el('blist');
+  if (!bopen) { box.classList.remove('on'); box.innerHTML = ''; return; }
+  const ids = ALL[bopen], isF = bopen === 'field', g = GROUPER[bopen] || (() => null);
+  let cur = null, h = '';
+  ids.forEach(id => {
+    const gr = isF ? blockKey(id) : g(id);
+    if (gr !== cur) {
+      cur = gr;
+      if (gr) h += isF ? blockHead(id) : '<div class="grp">' + esc(gr) + '</div>';
+    }
+    h += '<div class="opt" data-id="' + esc(id) + '" data-s="' +
+      esc((name1(id) + ' ' + listSub(id) + ' ' +
+           (isF ? recHead(id) : gr || '')).toLowerCase()) + '"><span>' +
+      esc(name1(id)) + '</span><span class="sub">' +
+      esc(isF ? name2(id) : listSub(id)) + '</span>' +
+      (isF ? '' : extLink(id)) + '</div>';
+  });
+  box.innerHTML = '<input class="filter" placeholder="絞り込み（' + ids.length + ' 件）">' +
+    '<div class="opts">' + h + '<p class="muted none" style="display:none">該当なし</p></div>';
+  box.classList.add('on');
+  const f = box.querySelector('.filter');
+  f.addEventListener('input', () => filterList(box, f.value));
+  f.focus();
+  box.querySelectorAll('.opt').forEach(o => o.addEventListener('click', () => {
+    bopen = null; drawBrowse(); pick(o.dataset.id);
+  }));
+}
+
+/* ====================== 検索 ====================== */
+const IDX = [];
+N.forEach(n => {
+  if (n.t === 'field' && n.o.kind !== 'article' && n.o.kind !== 'reference') return;
+  IDX.push({id: n.id, s: (name1(n.id) + ' ' + listSub(n.id) + ' ' +
+    (n.t === 'out' ? n.o.id.replace(/^[TF]_/, '').replace(/_/g, '.') + ' ' +
+      ((n.o.ti || {}).en || '') : '')).toLowerCase()});
+});
+const qEl = el('q'), hitsEl = el('hits');
+let hitIds = [], hitCur = -1;
+function runSearch() {
+  const q = qEl.value.trim().toLowerCase();
+  if (q.length < 2) { hitsEl.classList.remove('on'); return; }
+  const hit = IDX.filter(x => x.s.indexOf(q) >= 0).slice(0, 40);
+  hitIds = hit.map(x => x.id); hitCur = -1;
+  hitsEl.innerHTML = hit.length ? hit.map(x =>
+    '<div class="hit" data-id="' + esc(x.id) + '"><span class="tag">' +
+    esc(LAYERS[LIX[lay(x.id)]].n) + '</span><span>' + esc(name1(x.id)) +
+    '</span><span class="sub muted">' + esc(listSub(x.id)) + '</span></div>').join('')
+    : '<div class="hit muted">見つかりません</div>';
+  hitsEl.classList.add('on');
+  hitsEl.querySelectorAll('.hit').forEach(h => h.addEventListener('click', () => {
+    if (h.dataset.id) { hitsEl.classList.remove('on'); qEl.value = ''; pick(h.dataset.id); }
+  }));
+}
+qEl.addEventListener('input', runSearch);
+qEl.addEventListener('keydown', e => {
+  if (!hitIds.length) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    hitCur = Math.max(0, Math.min(hitIds.length - 1, hitCur + (e.key === 'ArrowDown' ? 1 : -1)));
+    hitsEl.querySelectorAll('.hit').forEach((h, i) => h.classList.toggle('cur', i === hitCur));
+    e.preventDefault();
+  } else if (e.key === 'Enter') {
+    hitsEl.classList.remove('on'); qEl.value = '';
+    pick(hitIds[hitCur < 0 ? 0 : hitCur]);
+  } else if (e.key === 'Escape') { hitsEl.classList.remove('on'); }
+});
+document.addEventListener('click', e => {
+  if (!e.target.closest('.find')) hitsEl.classList.remove('on');
+});
+
+/* ====================== 例と起動 ====================== */
+function firstId(pred) { for (const [k, n] of N) if (pred(n)) return k; return null; }
+el('copy').addEventListener('click', () => {
+  const t = LAYERS.filter(l => chain[l.k]).map(l =>
+    l.n + '　' + chain[l.k].map(name1).join(' › ') +
+    (name2(chain[l.k][chain[l.k].length - 1]) ? '（' +
+      name2(chain[l.k][chain[l.k].length - 1]) + '）' : '')).join('\n → ');
+  navigator.clipboard.writeText('__TRIAL__ 追跡索引\n' + t + '\n' + location.href);
+  el('copy').textContent = 'コピーした';
+  setTimeout(() => { el('copy').textContent = '経路をコピー'; }, 1500);
+});
+// 白紙に戻す。鎖・引き出し・一覧・検索語・URL のすべてを戻し、次の入口へ寄せる
+function reset() {
+  chain = {}; openDet.clear(); openPick = null; cur = null; ask = null; bopen = null;
+  qEl.value = ''; hitsEl.classList.remove('on');
+  history.replaceState(null, '', location.pathname + location.search);
+  drawBrowse(); draw();
+  qEl.focus();
+  window.scrollTo({top: 0});
+}
+el('reset').addEventListener('click', reset);
+// Esc は近いものから閉じる。開いている一覧 → 開いている詳細 → 入口の一覧 → 全部
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || e.target === qEl) return;
+  if (openPick) { openPick = null; draw(); }
+  else if (openDet.size) { openDet.clear(); draw(); }
+  else if (bopen) { bopen = null; drawBrowse(); }
+  else reset();
+});
+// 入口の例。CRF の1欄が SDTM の1変数へ1対1で対応し、そのまま ADaM・解析・図表へ繋がるもの
+// （crf-field-map・variable-map・ARD を突き合わせて機械的に洗い出した4件をすべて置く）。
+//   性別　　　　registration#field4 → DM.SEX     → ADSL.SEX    → An-5.2.1-03 ほか → 表 5.2.1
+//   幹細胞源　　hsct#field2         → PR.PRTRT   → ADSL.SOURCE → An-5.2.2-37 → 表 5.2.2
+//   ドナー情報　hsct#field3         → PR.PRCAT   → ADSL.DONOR  → An-5.2.2-36 → 表 5.2.2
+//   糖尿病の治療 baseline#field578  → FA.FASCAT  → ADSL.CMPDMTRT → An-5.4.13-02 → 表 5.4.13
+// 最後の1つは逆向き、図表から CRF へ遡る動きを見せるためのもの
+[['ex1', 'fld:registration#field4'], ['ex2', 'fld:hsct#field2'],
+ ['ex3', 'fld:hsct#field3'], ['ex4', 'fld:baseline#field578']].forEach(([b, id]) =>
+  el(b).addEventListener('click', () => pick(id)));
+el('ex5').addEventListener('click', () => {
+  const d = D.disp.find(x => x.id === 'T_5_4_1');
+  pick(d ? 'out:' + d.id : ALL.out[0]);
+});
+// 全図表が1ページに入った HTML への入口。追跡の前に全体像を眺めたいときのためのもので、
+// 1つの図表を追う索引とは役目が違うので見出しの隣に置く。日本語・英語は同じ場所で切り替える
+// （生成時に実在を確かめた相対パスだけを出すので、同梱が無い言語はボタンも出ない）
+(function () {
+  const w = D.whole || {};
+  const L = [['ja', '日本語版'], ['en', '英語版']].filter(([k]) => w[k]);
+  if (!L.length) return;
+  el('whole').innerHTML = '<span class="bl">全図表を1ページで</span>' +
+    L.map(([k, n]) => '<a class="ext" href="' + esc(w[k]) + '" target="_blank" hreflang="' +
+      k + '">' + n + '</a>').join('');
+})();
+window.addEventListener('hashchange', () => {     // 戻る・進む、貼られた URL から開くとき
+  const m = /n=([^&]+)/.exec(location.hash);
+  if (!m) return;
+  const id = decodeURIComponent(m[1]);
+  if (id !== cur && N.has(id)) pick(id);
+});
+(function () {
+  const m = /n=([^&]+)/.exec(location.hash);
+  const id = m && N.has(decodeURIComponent(m[1])) ? decodeURIComponent(m[1]) : null;
+  if (id) pick(id); else draw();
+})();
+</script>
+</body>
+</html>
