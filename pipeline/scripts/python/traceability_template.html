@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>__TRIAL__ 追跡索引</title>
+<title>__TRIAL__ トレーサビリティ索引</title>
 <!--
   画面の作り。データの組み立ては scripts/build-traceability.py。
   1本の鎖を縦に並べ、どの段からでも選び直せる形にしている。段をクリックすると
@@ -138,7 +138,7 @@
 </head>
 <body>
 <header><div class="in">
-  <h1>__TRIAL__ 追跡索引</h1>
+  <h1>__TRIAL__ トレーサビリティ索引</h1>
   <span id="whole" class="whole"></span>
   <span class="flow">図表の項目から CRF の入力欄まで、どちらの向きでも由来をたどれる</span>
 </div></header>
@@ -1001,7 +1001,7 @@ el('copy').addEventListener('click', () => {
     l.n + '　' + chain[l.k].map(name1).join(' › ') +
     (name2(chain[l.k][chain[l.k].length - 1]) ? '（' +
       name2(chain[l.k][chain[l.k].length - 1]) + '）' : '')).join('\n → ');
-  navigator.clipboard.writeText('__TRIAL__ 追跡索引\n' + t + '\n' + location.href);
+  navigator.clipboard.writeText('__TRIAL__ トレーサビリティ索引\n' + t + '\n' + location.href);
   el('copy').textContent = 'コピーした';
   setTimeout(() => { el('copy').textContent = '経路をコピー'; }, 1500);
 });

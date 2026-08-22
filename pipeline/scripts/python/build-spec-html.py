@@ -1,7 +1,7 @@
 # build-spec-html.py
 #
 # docs/ の仕様書（md）を、節ごとに id を振った HTML へ変換する。
-# 追跡索引（traceability.html）の「仕様書」欄から該当節へ直接飛べるようにするためのもので、
+# トレーサビリティ索引（traceability.html）の「仕様書」欄から該当節へ直接飛べるようにするためのもので、
 # 正本はあくまで md である（CLAUDE.md「文書の正本」）。HTML は配布用の派生物なので、
 # 内容を直すときは md を直してこれを回し直す。
 #
@@ -240,7 +240,7 @@ def main():
         title = m.group(1).strip() if m else os.path.splitext(f)[0]
         # 戻り道。索引は1つ上のフォルダにある置き方（パッケージの 16_1_9_methods・作業用の
         # output/spec）を前提にする。生成の順で索引がまだ無いこともあるため実在は見ない
-        back = ('<a class="back" href="%s">追跡索引へ戻る</a>' % args.back
+        back = ('<a class="back" href="%s">トレーサビリティ索引へ戻る</a>' % args.back
                 if args.back else '')
         tochtml = ''
         if len(toc) > 3:

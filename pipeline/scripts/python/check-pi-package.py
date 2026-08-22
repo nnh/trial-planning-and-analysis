@@ -82,7 +82,7 @@ def main():
         if not os.path.exists(f):
             err.append(f'{rel}: {kind}先が無い「{h}」')
             return
-        # 錨のうち `#n=out:...` の形は追跡索引の画面遷移で、HTML の錨ではないので見ない
+        # 錨のうち `#n=out:...` の形はトレーサビリティ索引の画面遷移で、HTML の錨ではないので見ない
         if (frag and '=' not in frag and f.lower().endswith(('.html', '.htm'))
                 and frag not in anchors_of(f)):
             warn.append(f'{rel}: 錨が無い「{h}」')
@@ -113,7 +113,7 @@ def main():
                 continue
             n_ref += 1
             check(rel, p, h)
-        # JS が組み立てるリンクの元（埋め込みデータの "url"）。追跡索引がここから
+        # JS が組み立てるリンクの元（埋め込みデータの "url"）。トレーサビリティ索引がここから
         # aCRF と図表へのリンクを作るので、静的な href と同じ基準で見る。
         for h in set(re.findall(r'"url":"([^"]*)"', t)):
             if h:

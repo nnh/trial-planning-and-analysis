@@ -1,6 +1,6 @@
 # build-traceability.py
 #
-# PI 向けの追跡索引 output/traceability.html を1ファイルで作る。
+# PI 向けのトレーサビリティ索引 output/traceability.html を1ファイルで作る。
 # CSS・JS・データをすべて埋め込み、ブラウザだけで開ける状態にする。
 #
 # 索引は「ノード」と「エッジ」でできている。ノードは追跡の対象（CRF の項目・SDTM の変数・

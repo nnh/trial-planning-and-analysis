@@ -4,13 +4,13 @@
 #
 # 階層は ICH E3（総括報告書の構成）の番号を骨格にする。14章が本文から参照する図表、
 # 16.1.2 が CRF の見本、16.1.9 が統計手法の記録、16.2 が被験者データ一覧。重篤な有害事象の
-# 経過（narratives）は E3 が 14.3.3 に置くものなので 14_3_3_narratives へ入れる。追跡索引は
+# 経過（narratives）は E3 が 14.3.3 に置くものなので 14_3_3_narratives へ入れる。トレーサビリティ索引は
 # E3 の構成要素ではないのでルート直下に置き、相対パスで 14章と 16.1.2 を参照する。
 # 設計の正本は docs/label-and-traceability-design.md の「PI 向けパッケージ」。
 #
 #   <試験ID>_PI_YYYYMMDD/
 #     README.html                    入口
-#     traceability.html              追跡索引（14_tlf と 16_1_2_acrf を相対で参照）
+#     traceability.html              トレーサビリティ索引（14_tlf と 16_1_2_acrf を相対で参照）
 #     14_tlf/ja/<表番号>.html         図表ごと（日本語。索引が既定で指す）
 #     14_tlf/en/<表番号>.html         図表ごと（英語）
 #     14_tlf/*.html *.rtf            通し読み用と配布用
@@ -220,7 +220,7 @@ def write_acrf_index(dest):
         '</style></head><body>\n<h1>注釈付き CRF（16.1.2）</h1>\n'
         f'<p>{len(rows)} 帳票。CRF の記入順に並べています。帳票の中の項目には '
         'SDTM の変数が注釈されています。</p>\n<ol>\n' + li +
-        '\n</ol>\n<p><a href="../traceability.html">追跡索引へ戻る</a>　'
+        '\n</ol>\n<p><a href="../traceability.html">トレーサビリティ索引へ戻る</a>　'
         '<a href="../README.html">最初のページへ戻る</a></p>\n</body></html>\n')
     return len(rows)
 
@@ -325,7 +325,7 @@ text-decoration:none;font-weight:600;margin:6px 8px 6px 0}
 .note{background:#fffbe6;border-left:4px solid #f0c000;padding:9px 13px;font-size:.9rem}
 </style></head><body>
 <h1>__TRIAL__ 解析パッケージ __DATE__</h1>
-<p><a class="big" href="traceability.html">追跡索引をひらく</a>
+<p><a class="big" href="traceability.html">トレーサビリティ索引をひらく</a>
 <a class="big" href="14_tlf/ja/__FIRST__">図表をひらく</a>
 <a class="big" href="16_1_2_acrf/index.html">CRF をひらく</a></p>
 
@@ -334,26 +334,26 @@ text-decoration:none;font-weight:600;margin:6px 8px 6px 0}
 <ul>
 <li><code>14_tlf/</code> … 図表。<code>ja/</code> と <code>en/</code> に1図表=1ファイルの HTML、
     通し読み用の HTML と配布用の RTF。図表ごとの HTML には言語の切り替えと、
-    追跡索引・解析・ADaM 変数へのリンクがあります</li>
+    トレーサビリティ索引・解析・ADaM 変数へのリンクがあります</li>
 __NARR__
 <li><code>16_1_2_acrf/</code> … 注釈付き CRF（__NACRF__帳票）。
     <a href="16_1_2_acrf/index.html">目次</a>から帳票を選べます。項目ごとに錨があり、
-    追跡索引から該当の入力欄へ直接飛びます</li>
+    トレーサビリティ索引から該当の入力欄へ直接飛びます</li>
 <li><code>16_1_9_methods/</code> … 統計手法の記録。define.html（SDTM・ADaM）と各仕様の
     HTML（<a href="16_1_9_methods/sdtm-spec.html">SDTM 作成仕様</a>・
     <a href="16_1_9_methods/adam-spec.html">ADaM 作成仕様</a>・
     <a href="16_1_9_methods/ars-spec-index.html">ARS 解析仕様</a>ほか）。
-    追跡索引の「仕様書」欄から該当の節へ直接飛びます</li>
+    トレーサビリティ索引の「仕様書」欄から該当の節へ直接飛びます</li>
 <li><code>data/ard/</code> … 図表の元になった結果値（ARD）。集計値で被験者単位ではありません</li>
 <li><code>reproduce/</code> … R 一式。図表まで作り直せます</li>
 __SUBJ__
 </ul>
 
 <h2>どう辿るか</h2>
-<p>追跡索引は、CRF の入力欄・SDTM のレコードと変数・ADaM 変数・解析・図表を1本の鎖として
+<p>トレーサビリティ索引は、CRF の入力欄・SDTM のレコードと変数・ADaM 変数・解析・図表を1本の鎖として
 縦に並べます。上から下がデータの流れる向きです。行を押すとその段で選べるものが出て、
 1つ選ぶと決まる範囲は自動で埋まります。決まらない段は候補の件数を出して選択を待ちます。</p>
-<p>図表からも遡れます。図表の HTML の下にある「追跡索引でこの図表を辿る」から索引の該当位置が
+<p>図表からも遡れます。図表の HTML の下にある「トレーサビリティ索引でこの図表を辿る」から索引の該当位置が
 開き、そこから ADaM・SDTM・CRF へ下れます。</p>
 
 <h2>作り直すには</h2>
@@ -452,7 +452,7 @@ def main():
             os.makedirs(m, exist_ok=True)
             open(os.path.join(m, dst), 'w', encoding='utf-8', newline='\n').write(t)
             n_m += 1
-    # 仕様は md ではなく HTML で入れる。節ごとに id があるので、追跡索引の「仕様書」欄から
+    # 仕様は md ではなく HTML で入れる。節ごとに id があるので、トレーサビリティ索引の「仕様書」欄から
     # 該当節へ直接飛べる。正本は docs の md で、この HTML は build-spec-html.py が作る派生物。
     # 索引の生成より前に作る（索引は同梱した HTML の節の id を読んでリンクを決める）
     before = set(glob.glob(os.path.join(m, '*.html')))
@@ -516,7 +516,7 @@ def main():
         subj = ('<li><code>data/sdtm</code>・<code>data/adam</code>・'
                 '<code>reproduce/input</code> … 被験者単位のデータ（取り扱いに注意）</li>')
 
-    # --- 追跡索引（相対パスを E3 の階層に合わせて作り直す） ---
+    # --- トレーサビリティ索引（相対パスを E3 の階層に合わせて作り直す） ---
     o = sh(sys.executable, os.path.join(SCRIPTS, 'build-traceability.py'),
            '--out', os.path.join(pkg, 'traceability.html'),
            '--acrf-base', '16_1_2_acrf', '--tlf-base', '14_tlf/ja')

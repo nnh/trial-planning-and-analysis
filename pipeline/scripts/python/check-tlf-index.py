@@ -1,6 +1,6 @@
 # check-tlf-index.py
 #
-# docs/tlf-index.csv（図表の宣言。SAS系・R系・追跡索引の3つが読む正本）の健全性を見る。
+# docs/tlf-index.csv（図表の宣言。SAS系・R系・トレーサビリティ索引の3つが読む正本）の健全性を見る。
 # 設計は docs/tlf-declaration-design.md。
 #
 #   - 列の並びが SAS 側の input 文（%tlf_read）と同じか
