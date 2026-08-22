@@ -9,7 +9,6 @@
 - [ptosh-sdtm-preparation.md](ptosh-sdtm-preparation.md) — Ptosh から受領した、SDTM のドメイン名・変数名は使うが派生変数を持たない CSV を、CDISC CORE で検証できる状態にするまでの手順
 - [sdtm-conformance-validation.md](sdtm-conformance-validation.md) — CDISC CORE（cdisc-rules-engine）の導入・実行・実行時の落とし穴
 - [cdisc-ars.md](cdisc-ars.md) — CDISC ARS（Analysis Results Standard）と ARD の調査。二重コーディングの突合を ARD レベルで行う根拠
-- [declaration-terminology-research.md](declaration-terminology-research.md) — 「宣言」という用語の検討。代替語の調査結果
 
 雛形の CSV は [../templates/](../templates/README.md)、機械検査は [../skills/](../skills/README.md) に置く該当スキルが持つ。解析の段階で見つかった欠陥の型は [../findings/analysis-findings-log.md](../findings/analysis-findings-log.md)。
 
