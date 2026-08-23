@@ -1,0 +1,7 @@
+# Python の実行時生成物
+__pycache__/
+*.pyc
+
+# OS・エディタ
+.DS_Store
+Thumbs.db

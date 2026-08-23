@@ -219,7 +219,7 @@ ADaM の作成に着手する前に、以下がそろっている必要がある
 - SAS。入力・処理・出力をすべて UTF-8 にする。日本語版の既定 config は shift-jis なので、起動時に Unicode サーバーの config を指す。起動の作法と符号化の切り替えは組織内の SAS 環境ドキュメント「セッションの文字符号化」が持つ。既存試験の移行は [`sas-utf8-migration`](../skills/sas-utf8-migration/SKILL.md) スキル
 - R 環境。`{survival}`（生存解析）、`{haven}`（SAS データセットの読み取り）、`{jsonlite}`（Dataset-JSON）、`{readr}`／`{dplyr}`／`{tibble}`（データ操作）、`{waldo}`（突合）、`{openxlsx2}`／`{mschart}`（Excel 出力とチャート）。バージョンを `renv` で固定し、研究者が受領後に同じ環境で再実行・拡張できるようにする。Windows では版に対応するバイナリが CRAN に無いパッケージがソースからのビルドになるため Rtools が要る
 - CDISC CORE（SDTM の適合性検証。[sdtm-conformance-validation.md](sdtm-conformance-validation.md)）
-- Python。トレーサビリティ索引・仕様書 HTML・納品パッケージの生成と、各種の検査
+- Python。トレーサビリティ索引・仕様書 HTML・納品パッケージの生成と、各種の検査。標準ライブラリだけで動かし、外部パッケージを足さない（理由と、受領資料の xlsx をどう読むかは [scripts/](README.md#scripts)）
 - パスの自動解決。コードとデータを別ツリーに置き、実行時に両方を解決する
 
 ## 実行の順序
