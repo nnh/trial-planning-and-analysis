@@ -33,7 +33,12 @@ def latest_pkg():
     box = boxpath.trial_dir(required=False)
     if not box:
         return None
-    c = sorted(glob.glob(os.path.join(box, 'output', boxpath.trial_id() + '_PI_*')))
+    # 納品パッケージの置き場は output/deliver/<系統>/。旧構成（output/ 直下）にも残って
+    # いる場合があるので両方見て、名前の並びで最後（日付が新しいもの）を採る
+    c = sorted(glob.glob(os.path.join(box, 'output', 'deliver', 'r',
+                                      boxpath.trial_id() + '_PI_*'))
+               + glob.glob(os.path.join(box, 'output', boxpath.trial_id() + '_PI_*')),
+               key=lambda p: os.path.basename(p))
     return c[-1] if c else None
 
 
@@ -129,6 +134,16 @@ def main():
             if 'www.w3.org/' in u:
                 continue
             warn.append(f'{rel}: 本文・データ中の外部 URL「{u[:80]}」')
+
+        # 作った側の端末のローカルパス。配る相手には開けず、ユーザー名や職員番号を
+        # そのまま外へ出すことになる。ある試験で納品物の3ファイルに出ていた。固定前の
+        # 作業記録に書かれた作業ファイルの所在、別試験の参考実装、どの端末で基準値を
+        # 作ったかを示すために並べた3台のホームディレクトリである。いずれも本文中の
+        # 記述で、リンクとして張られていないため既存のリンク検査では拾えなかった。
+        for m in set(re.findall(r'[A-Za-z]:\\Users\\[^\s"\'<>`|]+', t)):
+            warn.append(f'{rel}: 端末のローカルパス「{m[:80]}」')
+        for m in set(re.findall(r'/(?:Users|home)/[A-Za-z0-9._-]+/[^\s"\'<>`|]+', t)):
+            warn.append(f'{rel}: 端末のローカルパス「{m[:80]}」')
 
     # R のコメントは仕様書を `docs/<名前>.md` の相対パスで指す。R を回す起点（reproduce/）から
     # 見て同じ位置に md が無いと、配った先で参照が辿れない。同梱は build-pi-package.py が行う。
