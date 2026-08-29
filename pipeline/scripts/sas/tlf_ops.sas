@@ -124,8 +124,12 @@ proc format cntlin=_labfmt; run;
            max(case when a.STATNAME='ucl'  then a.STAT else . end) as _u,
            max(input(compress(a.VARLEVEL, 'Y年'), best8.)) as _ord
     from ard.ard as a left join _lvcat as c on strip(a.VARLEVEL) = c.LVKEY
+    /* 指定時点（Y1〜Y5）の行だけを取る。除外ではなく採用で書くのは、Mth-KM が指定時点の
+       ほかに生存曲線の全イベント時点（T<年>）と中央値（MEDIAN）と例数（水準なし）を
+       持つため。除外の列挙で書いていたときに曲線の行が表へ入り、表 5.4.1 が5行のところ
+       89行出ていた（2026-08-29 に検出。R系の d_surv も同じ形に直した）*/
     where a.ANALYSID = "&analysis_id" and a.CONTEXT = 'survival'
-      and a.VARLEVEL not in ('中央値', 'MEDIAN') and a.VARLEVEL ne ' '
+      and prxmatch('/^Y[0-9]/', strip(a.VARLEVEL))
     group by coalescec(c.LVLBL, a.VARLEVEL)
     order by _ord;
   quit;
@@ -190,12 +194,100 @@ proc format cntlin=_labfmt; run;
 %mend _deftlfhtml;
 %_deftlfhtml
 
+/* Excel（id=x）は呼び出し側が1言語につき1ブックを開いたままにする。ここは表番号ごとに
+   シートを切り替えるだけ。_xllast に直前の表番号を持ち、変わったときだけ新しいシートを
+   起こす。1つの表番号で表示型を何度も呼ぶもの（%tab_aegr の TKI区分 × 治療相で18表）が
+   あり、呼び出しごとにシートを起こすと同じ表番号のシートが18枚できてしまう。
+   sheet_interval='now' は新しいシートを1枚起こす一度きりの指定で、そのあとは開いた
+   ときの設定（'none'）に戻るため、こちらで戻さない。戻す ods excel options 文を
+   表のたびに置くと、その文自体がシートを分ける。
+
+   表 5.4.7.3（18表）だけは、こちらがシートを起こすのは1回でも（NOTE の数で88回＝
+   宣言の数と一致することを確認した）、ODS EXCEL が途中で1枚増やして
+   「T_5_4_7_3」と「T_5_4_7_3 2」の2枚になる。同じシートの中で表題（&ph &tk を含む）が
+   変わることによる ODS 側の改シートで、こちらからは抑えられない。SAS系の Excel は
+   証跡であって配布物ではないので、この1枚のずれは許容する。R系は18表を1シートへ積む
+   （2026-08-29）。 */
+%global tlfxlsx _lastlbl;
+%macro _deftlfxlsx;
+  %if %length(&tlfxlsx) = 0 %then %let tlfxlsx = 0;
+%mend _deftlfxlsx;
+%_deftlfxlsx
+
 %macro _tlfopen(lblid);
   %if &tlfhtml = 1 %then %do;
     ods html5(id=h) path="&tlfdir" file="&lblid..html"
         options(svg_mode="inline") style=journal;
   %end;
+  /* 表番号が変わったときだけ、通し読みの錨（目次のリンク先）と Excel のシートを起こす。
+     同じ表番号で表示型を何度も呼ぶもの（%tab_aegr の18表）があり、呼び出しごとに
+     起こすと錨の名前が重複し、シートも表番号ごとに何枚も割れる */
+  %if "&_lastlbl" ne "&lblid" %then %do;
+    %let _lastlbl = &lblid;
+    %if &tlfhtml = 1 %then %do;
+      ods html5(id=all) anchor="&lblid";
+    %end;
+    %if &tlfxlsx = 1 %then %do;
+      ods excel(id=x) options(sheet_interval='now' sheet_name="&lblid");
+    %end;
+  %end;
 %mend _tlfopen;
+
+/*========================================================================================
+  通し読み HTML の先頭に置く表題と目次。図表が88件あるので、目次が無いページは実質的に
+  読めない。R系（TLF.R）は同じものを nav.toc として出す。
+
+  目次は宣言（docs/metadata/tlf-index.csv）の順、すなわち章番号順に並べる。表示名は
+  label-catalog の表題で、データセットのまま扱ってマクロ変数へ入れない（表題には
+  % と & が入る。表 5.4.7.3 の「&ph &tk」は表を分ける印なので、目次では落とす）。
+  リンク先は %_tlfopen が仕込む錨（表番号）。
+
+  R系は実際に描けた図表だけを目次に載せるが、こちらは宣言をそのまま載せる。描けなかった
+  宣言があるとリンクが空振りするので、そのときは駆動のログ（WARNING）で気づく。
+========================================================================================*/
+%macro _tlftoc(idx=work._tlfidx);
+  %if &tlfhtml ne 1 %then %return;
+  proc sql noprint;
+    create table _toc as
+    select i.seq as SEQ, i.lblid as LBLID length=20,
+           case when missing(c.LBL) then i.lblid else c.LBL end as TITLE length=400
+    from &idx as i
+         left join (select strip(key) as KEY length=80,
+                           %if %upcase(&lang) = EN %then strip(label_en);
+                           %else strip(label_ja); as LBL length=400
+                    from _labcat where strip(kind) = 'title') as c
+              on strip(i.lblid) = c.KEY
+    order by SEQ;
+  quit;
+  data _toc;
+    set _toc;
+    /* 表を分ける印（&ph・&tk）は目次では落とす。R系の ttl_sub と同じ扱い */
+    TITLE = strip(prxchange('s/\s*&(ph|tk)\b//i', -1, strip(TITLE)));
+  run;
+
+  /* Excel にも同じ目次が先頭のシートとして入る（R系のブックと同じ形）。ここで名前を
+     付けておく。リンクはシートではなく HTML の錨を指すので Excel では効かない */
+  %if &tlfxlsx = 1 %then %do;
+    ods excel(id=x) options(sheet_name="%lblfx(toc)");
+  %end;
+  title1 justify=left "&tlfttl";
+  title2 justify=left "%lblfx(toc)";
+  /* LISTING を閉じてから出す。目次は HTML と Excel のためのもので、表題の列（400バイト）は
+     LISTING の列幅の上限（127）を超えて ERROR になる（2026-08-29）。%fig_km と同じ扱い */
+  ods listing close;
+  proc report data=_toc nowd noheader
+      style(report)={frame=void rules=none cellspacing=0}
+      style(column)={fontsize=9pt borderwidth=0};
+    column LBLID TITLE;
+    define LBLID / display noprint;
+    define TITLE / display;
+    compute TITLE;
+      call define(_col_, 'style', 'style={url="#' || strip(LBLID) || '"}');
+    endcomp;
+  run;
+  ods listing;
+  title;
+%mend _tlftoc;
 
 %macro _tlfclose;
   %if &tlfhtml = 1 %then %do;
@@ -820,8 +912,16 @@ proc format cntlin=_labfmt; run;
      生存推定・生存率・打ち切り など）が英語版の rtf にも入る（2026-08-20） */
   ods select survivalplot;
   /* 打ち切りの目印（既定で出る）と95%信頼限界を出す。R系の図と読み方を揃えるため
-     （2026-08-20）。cl は層別のときも層ごとに描かれる */
-  proc lifetest data=_k method=km plots=survival(atrisk=0 to 5 by 1 cl);
+     （2026-08-20）。cl は層別のときも層ごとに描かれる。
+
+     conftype=linear を明示する。PROC LIFETEST の既定は log-log 変換で、ars-spec-index.md
+     の未決事項 A-2（SAP 4.4 の「Greenwood の公式」の文言どおり線形形式を採る）に反する。
+     書かずにいた間、図の帯だけが採らないと決めた方式で描かれていた。表・ARD（%ard_km は
+     conftype=linear を明示している）・R系（survfit の conf.type='plain'）はいずれも線形形式で、
+     図だけが外れていた。差は小さくない。指定時点で下限が 1.3〜2.0 ポイント、全イベント時点の
+     最大では 4.4 ポイント動く（生存割合が1に近いほど離れる）。主要評価項目の3年EFS割合の
+     下限は図が 60.3%、表が 61.6% と食い違っていた（2026-08-29 に是正）。 */
+  proc lifetest data=_k method=km conftype=linear plots=survival(atrisk=0 to 5 by 1 cl);
     time AVALY * CNSR(1);
     %if %length(&group) %then %do; strata &group; %end;
     label AVALY = "%lblfx(xaxis_km)";
@@ -1058,7 +1158,10 @@ proc format cntlin=_labfmt; run;
            max(case when a.STATNAME='ucl' then a.STAT else . end) as _u,
            max(input(compress(a.VARLEVEL, 'Y年'), best8.)) as _ord
     from ard.ard as a left join _lvcat as c on strip(a.VARLEVEL) = c.LVKEY
-    where a.ANALYSID = "&analysis_id" and a.CONTEXT = 'cuminc' and a.VARLEVEL ne ' '
+    /* 指定時点（Y1〜Y5）の行だけを取る。%tab_km と同じ形にしておく（Mth-CIF は今のところ
+       曲線の全時点を持たないが、持たせたときに黙って表へ入らないようにする）*/
+    where a.ANALYSID = "&analysis_id" and a.CONTEXT = 'cuminc'
+      and prxmatch('/^Y[0-9]/', strip(a.VARLEVEL))
     group by coalescec(c.LVLBL, a.VARLEVEL)
     order by _ord;
   quit;
@@ -1533,9 +1636,14 @@ proc format cntlin=_labfmt; run;
     infile "&path" dsd dlm=',' truncover firstobs=2 encoding='utf-8' lrecl=32767;
     length seq 8 lblid $20 display $20 analysis_id $40 output_id $40 filter $200
            groups $200 levels $200 item_var $40 item_label $200 vars $200 labels $200
-           paramcd $20 where $100 group $20 blocks $600;
+           paramcd $20 where $100 group $20 blocks $600 subtypemap $200;
+    /* 列を足したら LENGTH と INPUT の両方へ書く。LENGTH にだけ足すと、その列は常に
+       空のまま駆動へ渡り、宣言に書いた値が黙って効かない。subtypemap が 2026-08-29 まで
+       この状態で、%tab_mrlist がサブタイプの対応を受け取れていなかった（値は
+       docs/metadata/tlf-index.csv に入っていた）。列の並びは同 CSV が正本 */
     input seq lblid $ display $ analysis_id $ output_id $ filter $ groups $ levels $
-          item_var $ item_label $ vars $ labels $ paramcd $ where $ group $ blocks $;
+          item_var $ item_label $ vars $ labels $ paramcd $ where $ group $ blocks $
+          subtypemap $;
   run;
   proc sort data=&out; by seq; run;
 %mend tlf_read;
@@ -1553,7 +1661,7 @@ proc format cntlin=_labfmt; run;
       length _a $8000;
       _a = 'lblid=' || strip(lblid);
       array _v{*} analysis_id output_id filter groups levels item_var item_label
-                  vars labels paramcd where group blocks;
+                  vars labels paramcd where group blocks subtypemap;
       do _j = 1 to dim(_v);
         if not missing(_v[_j]) then
           _a = strip(_a) || ',' || strip(vname(_v[_j])) || '=' || strip(_v[_j]);

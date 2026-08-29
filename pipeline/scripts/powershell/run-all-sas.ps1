@@ -108,6 +108,15 @@ foreach ($s in $steps) {
   if ($s.WaitFor) { Wait-BoxFile (Join-Path $box $s.WaitFor) }
 }
 
+# ARS の ReportingEvent。パイプラインの部品ではなく末端から枝分かれする成果物なので、
+# 段階の一覧には入れず最後に1度だけ作る。-Only で一部だけ回したときは ARD が古い可能性が
+# あるので作らない（pipeline/cdisc-ars.md「ARS を採るかどうかの判断軸」）。
+if (-not $Only) {
+  Write-Host ""
+  Write-Host "ARS の ReportingEvent"
+  & python (Join-Path $repo 'scripts' 'build-ars-json.py') 2>&1 | ForEach-Object { "  $_" }
+}
+
 $min = [math]::Round(((Get-Date) - $t0).TotalMinutes, 1)
 $e = ($results | Measure-Object Error -Sum).Sum
 $w = ($results | Measure-Object Warning -Sum).Sum

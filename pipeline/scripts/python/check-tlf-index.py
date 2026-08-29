@@ -24,9 +24,12 @@ IDX = os.path.join(REPO, 'docs', 'metadata', 'tlf-index.csv')
 SAS = os.path.join(REPO, 'program', 'sas', 'macro', 'tlf_ops.sas')
 RSRC = os.path.join(REPO, 'program', 'r', boxpath.trial_id() + '_TLF.R')
 
+# 列の並びは docs/metadata/tlf-index.csv が正本。SAS の %tlf_read（LENGTH 文と INPUT 文と
+# 駆動の array）と R の read_csv が同じ並びを読むので、列を足したらこの4箇所を揃える。
+# 1箇所でも漏れると、その列は宣言に書いても黙って効かない
 COLS = ['seq', 'lblid', 'display', 'analysis_id', 'output_id', 'filter', 'groups',
         'levels', 'item_var', 'item_label', 'vars', 'labels', 'paramcd', 'where',
-        'group', 'blocks']
+        'group', 'blocks', 'subtypemap']
 
 # 表示型ごとに埋まっていなければならない列
 REQ = {'tab_km': ['analysis_id'], 'tab_prop': ['analysis_id'], 'tab_cif': ['analysis_id'],

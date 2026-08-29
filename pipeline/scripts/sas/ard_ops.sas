@@ -251,6 +251,99 @@ comment      : 図表ごとにプログラムを分けず、手法（本ファ�
   %ard_stamp(_t_km1, Mth-KM)
   %ardappend(_t_km1)
 
+  /* 生存曲線。Mth-KM の定義（ars-spec-index.md）は「生存曲線」を先頭に挙げており、
+     指定時点の値だけでは定義を満たさない。全イベント時点の推定値・信頼限界・リスク集合数・
+     打ち切り数を持たせる（2026-08-29。ars-migration-plan.md の第3段）。図はこれを読んで
+     描くので、図の値も突合の対象になる。
+
+     材料は2つ要る。outsurv は信頼限界を持つが Left（リスク集合数）を持たず、
+     ProductLimitEstimates は Left・Failed・Censor を持つが信頼限界を持たない。時点で結合する。
+     timelist と reduceout を付けると指定時点だけに畳まれるため、曲線用は付けずに回す。
+
+     VARLEVEL には時点を `T<年>` の形で入れる。指定時点は `Y<年>` なので混ざらない。 */
+  ods select none;
+  ods output ProductLimitEstimates = _plec;
+  /* plots= を書くと ODS graphics が無効な状態で「有効にせよ」という WARNING が出る。
+     図はここでは要らない（%fig_km が別に描く）ので plots= 自体を書かない。 */
+  proc lifetest data=_km method=km conftype=linear alpha=0.05 outsurv=_curve;
+    time AVALY * CNSR(1);
+  run;
+  ods select all;
+
+  /* 同一時点に複数の被験者がいると、どちらのデータセットも1時点に複数行を返す。
+     outsurv は打ち切りと死亡で行が分かれ、ProductLimitEstimates は被験者ごとに行が出る。
+     時点を突合キーにするので、時点ごとに1行へ畳む。畳み方は、リスク集合数はその時点に
+     入った時点での人数（最大）、打ち切り数は合計、生存割合と信頼限界はその時点の最終値
+     （階段の右端）を採る。 */
+  proc sort data=_curve out=_curve1; by AVALY; run;
+  data _curve2;
+    set _curve1; by AVALY;
+    /* SAS は打ち切りだけの時点で SURVIVAL・SDF_LCL・SDF_UCL を空にする。R の survfit は
+       直前の推定値を保つ。KM は階段関数なので、イベントが無ければ推定値は変わらないという
+       R の扱いが正しい。直前の値で埋めて定義を揃える（2026-08-29）。 */
+    /* SURVIVAL と SDF_LCL は欠測になる条件が違う。打ち切りだけの時点は SURVIVAL も空だが、
+       生存割合が1の区間などは SURVIVAL に値があって信頼限界だけが空になる。
+       まとめて分岐すると後者で信頼限界が更新されず空のまま残るので、変数ごとに見る。 */
+    retain _s _l _u;
+    if not missing(SURVIVAL) then _s = SURVIVAL; else SURVIVAL = _s;
+    if not missing(SDF_LCL)  then _l = SDF_LCL;  else SDF_LCL  = _l;
+    if not missing(SDF_UCL)  then _u = SDF_UCL;  else SDF_UCL  = _u;
+    if last.AVALY;              /* その時点の最終値が階段の右端 */
+    drop _s _l _u;
+  run;
+  /* リスク集合数の定義を R の survfit$n.risk に揃える。PROC LIFETEST の Left は
+     「その時点を処理した後の残り人数」だが、at risk table が示すのは「その時点で
+     リスクに晒されている人数」＝処理前の人数である。時点ごとに畳んだうえで、
+     その時点のイベント数と打ち切り数を戻して処理前の値にする（2026-08-29）。 */
+  data _plecd;
+    set _plec;
+    by AVALY;
+    retain _prevf 0;
+    if _n_ = 1 then _prevf = 0;
+    _fd = Failed - _prevf;          /* その時点のイベント数（Failed は累積） */
+    _prevf = Failed;
+    _cd = coalesce(Censor, 0);
+    keep AVALY Left _fd _cd;
+  run;
+
+  proc sql;
+    create table _plec2 as
+    select AVALY,
+           min(Left) + sum(_fd) + sum(_cd) as Left,   /* 処理前のリスク集合数 */
+           sum(_cd) as Censor
+    from _plecd group by AVALY;
+  quit;
+
+  data _t_km4;
+    length ANALYSID $40 OUTPUTID $20 ANALSET $10 SUBSET $20 GROUP1 $20 GROUP1L $40
+           VARIABLE $80 VARLEVEL $60 STATNAME $20 STATLBL $60 STATC $60 CONTEXT $20;
+    merge _curve2(in=a) _plec2;
+    by AVALY;
+    /* 時点0（起点）は outsurv が出すが R の survfit$time は最初のイベント時点から始まる。
+       起点の生存割合が1であることは推定結果ではなく定義なので、曲線の結果値には含めない。
+       描画で起点から線を引くのは表示側の仕事である（2026-08-29）。 */
+    if a and AVALY > 0;
+    ANALYSID = "&analysid"; OUTPUTID = "&outputid"; ANALSET = "&analset";
+    SUBSET = "&subset"; GROUP1 = "&group1"; GROUP1L = "&group1l";
+    VARIABLE = "&paramcd"; CONTEXT = 'survival'; STATC = ' ';
+    /* 時点は突合キーになるので、両系統で同じ文字列になる書式に固定する。
+       SAS の best12. と R の format は既定の桁が違い、同じ値でも別の文字列を作る。
+       日単位の元データを 365.25 で割った値なので、小数第6位（約0.03秒）で足りる。 */
+    VARLEVEL = cats('T', put(round(AVALY, 1e-6), 12.6));
+    STATNAME = 'time';    STATLBL = 'Time (years)';         STAT = AVALY;    output;
+    STATNAME = 'surv';    STATLBL = 'Survival probability'; STAT = SURVIVAL; output;
+    /* 直前値で埋めてあるので欠測で分岐しない。分岐すると打ち切りだけの時点で
+       lcl・ucl の行が落ち、R 側とキーの集合がずれる（2026-08-29）。 */
+    STATNAME = 'lcl';     STATLBL = '95% CI lower limit';   STAT = SDF_LCL;  output;
+    STATNAME = 'ucl';     STATLBL = '95% CI upper limit';   STAT = SDF_UCL;  output;
+    STATNAME = 'atrisk';  STATLBL = 'Number at risk';       STAT = Left;     output;
+    STATNAME = 'ncensor'; STATLBL = 'Number censored';      STAT = Censor;   output;
+    keep ANALYSID OUTPUTID ANALSET SUBSET GROUP1 GROUP1L VARIABLE VARLEVEL
+         STATNAME STATLBL STAT STATC CONTEXT;
+  run;
+  %ard_stamp(_t_km4, Mth-KM)
+  %ardappend(_t_km4)
+
   /* 中央値（Brookmeyer and Crowley 法の95%CI） */
   data _t_km2;
     length ANALYSID $40 OUTPUTID $20 ANALSET $10 SUBSET $20 GROUP1 $20 GROUP1L $40

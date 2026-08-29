@@ -24,7 +24,7 @@ filename _o clear;
 
 /* 値水準メタデータ用の --TESTCD → --TEST の対応。update-define-xml.ps1 が
    ValueList の ItemDef を実データに合わせるのに使う。--ORRES の値水準を持つ
-   ドメインだけを対象にする（docs/sdtm-conformance-findings-20260815.md D-1） */
+   ドメインだけを対象にする（docs/records/sdtm-conformance-findings-20260815.md D-1） */
 %let vlm_dom = LB FA RS VS DD MB QS;
 %macro testmap;
   %local i dom;
@@ -66,7 +66,7 @@ filename _v clear;
 
    対象外の変数の CodeList は受領版のままにする。対象を増やすときはこのリストに足す
    （update-define-xml.ps1 はこの CSV に出てくる変数だけを対象にする）。
-   docs/sdtm-spec.md 3.6（FATESTCD 是正）・4.1・4.2（外部データ由来の値）を参照。
+   docs/spec/sdtm-spec.md 3.6（FATESTCD 是正）・4.1・4.2（外部データ由来の値）を参照。
    LB:VISIT は受領 define.xml が VISITNUM の数値 CodeList を割り当てているための是正。
    他のドメインの VISIT は受領版のまま CodeList を持たない。
    FA:FACAT は 2026-08-20 に add から replace へ移した。受領値 'TREATENT' を SDTM 層で

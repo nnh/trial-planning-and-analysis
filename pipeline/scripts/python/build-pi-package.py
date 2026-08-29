@@ -14,6 +14,7 @@
 #     14_tlf/ja/<表番号>.html         図表ごと（日本語。索引が既定で指す）
 #     14_tlf/en/<表番号>.html         図表ごと（英語）
 #     14_tlf/*.html                  通し読み用
+#     14_tlf/*.xlsx                  言語ごとに1ブック（1図表=1シート。KM はネイティブなチャート）
 #     14_3_3_narratives/             重篤な有害事象の経過（PI 向けの読み物。外部提供の対象外）
 #     16_1_2_acrf/<帳票>.html         注釈付き CRF 62帳票（#fieldNN の錨つき）
 #     16_1_9_methods/                define.html（SDTM・ADaM）と仕様の HTML（節に錨つき）
@@ -361,8 +362,10 @@ text-decoration:none;font-weight:600;margin:6px 8px 6px 0}
 <p>階層は ICH E3（総括報告書の構成）の番号に合わせてあります。</p>
 <ul>
 <li><code>14_tlf/</code> … 図表。<code>ja/</code> と <code>en/</code> に1図表=1ファイルの HTML、
-    通し読み用の HTML と配布用の RTF。図表ごとの HTML には言語の切り替えと、
-    トレーサビリティ索引・解析・ADaM 変数へのリンクがあります</li>
+    通し読み用の HTML、言語ごとの Excel（1図表=1シート）。図表ごとの HTML には言語の
+    切り替えと、トレーサビリティ索引・解析・ADaM 変数へのリンクがあります。Excel は
+    数値をそのまま扱えるようにしたもので、生存時間曲線はシート上のデータ範囲を参照する
+    チャートなので、値や体裁を Excel の中で調節できます</li>
 __NARR__
 <li><code>16_1_2_acrf/</code> … 注釈付き CRF（__NACRF__帳票）。
     <a href="16_1_2_acrf/index.html">目次</a>から帳票を選べます。項目ごとに錨があり、
@@ -455,17 +458,24 @@ def main():
         # 図表ごとの HTML だけを拾う。同じディレクトリに通し読み HTML も置くため
         n_fig[lang] = (copy_tlf(src, os.path.join(pkg, '14_tlf', lang), 'T_*.html')
                        + copy_tlf(src, os.path.join(pkg, '14_tlf', lang), 'F_*.html'))
-    n_doc = 0
+    n_doc = n_xl = 0
     docs = []
     for lang in ('ja', 'en'):
         d = os.path.join(box, 'output', 'tlf', 'r-' + lang)
         docs += glob.glob(os.path.join(d, boxpath.trial_id() + '_TLF_*_r.html'))
+        # Excel（言語ごとに1ブック、図表ごとに1シート）。研究者が数値をそのまま扱え、
+        # 生存時間曲線はブック内のデータ範囲を参照するチャートなので図も調節できる
+        docs += glob.glob(os.path.join(d, boxpath.trial_id() + '_TLF_*_r.xlsx'))
     for p in sorted(docs):
         # 配布物の名前から実装系統の印（_r）を落とす
         base = os.path.basename(p).replace('_r.', '.')
         copy(p, os.path.join(pkg, '14_tlf', base))
-        n_doc += 1
-    print(f'  14_tlf: 図表ごと ja {n_fig["ja"]} / en {n_fig["en"]}、通し読み {n_doc}')
+        if base.endswith('.xlsx'):
+            n_xl += 1
+        else:
+            n_doc += 1
+    print(f'  14_tlf: 図表ごと ja {n_fig["ja"]} / en {n_fig["en"]}、'
+          f'通し読み {n_doc}、Excel {n_xl}')
 
     # --- 14.3.3 重篤な有害事象の経過（narratives） ---
     n_nar, n_ev, n_sub = copy_narratives(box, os.path.join(pkg, '14_3_3_narratives'))
@@ -517,6 +527,15 @@ def main():
     for p in sorted(glob.glob(os.path.join(box, 'output', 'compare', 'tlf_compare_*.csv'))):
         copy(p, os.path.join(m, os.path.basename(p)))
         n_m += 1
+    # ARS の ReportingEvent。解析の定義と結果値が CDISC の標準形式で1つに入っている。
+    # ARS を入力とするツール（TFL Designer 等）に載せられ、将来の再利用にも効く。
+    # 被験者単位の情報は含まない（集計値のみ）。docs/spec/ars-migration-plan.md。
+    for sysname in ('sas', 'r'):
+        src = os.path.join(box, 'datasets', sysname, 'ard',
+                           f'reporting-event-{sysname}.json')
+        if os.path.exists(src):
+            copy(src, os.path.join(m, os.path.basename(src)))
+            n_m += 1
     print(f'  16_1_9_methods: {n_m} ファイル')
 
     # --- data（ARD は集計値なので既定で入れる） ---
