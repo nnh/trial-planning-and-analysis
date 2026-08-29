@@ -1,6 +1,6 @@
 # check-variable-map.py
 #
-# docs/variable-map.csv の整合を確かめる。手で維持する正本なので、編集したら回す。
+# docs/metadata/variable-map.csv の整合を確かめる。手で維持する正本なので、編集したら回す。
 #   - layer / dataset / variable が一意か
 #   - origin の値が CRF / Derived / Assigned / Predecessor / Protocol のいずれか
 #   - origin=Predecessor なら predecessor が入っているか
@@ -10,7 +10,7 @@ import sys, csv, os, re, collections
 sys.stdout.reconfigure(encoding='utf-8')
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-P = os.path.join(REPO, 'docs', 'variable-map.csv')
+P = os.path.join(REPO, 'docs', 'metadata', 'variable-map.csv')
 OK_ORIGIN = {'CRF', 'Derived', 'Assigned', 'Predecessor', 'Protocol'}
 
 with open(P, encoding='utf-8-sig', newline='') as f:

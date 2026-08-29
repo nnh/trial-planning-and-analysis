@@ -10,7 +10,7 @@
 #   python scripts/build-spec-html.py --quiet          ... 1行だけ報告する
 #
 # 節の id は `s-<節番号>` で、節番号は見出しの先頭にある番号（`3.7`・`2.2.1`・`Out-5.2.1`）を
-# そのまま使う。docs/variable-map.csv の spec_ref（`sdtm-spec.md §3.7`）と ARD の output_id
+# そのまま使う。docs/metadata/variable-map.csv の spec_ref（`sdtm-spec.md §3.7`）と ARD の output_id
 # （`Out-5.2.1`）から機械的に組める形にしてあり、索引側は生成した HTML の id を読んで
 # 実在を確かめてからリンクを出す。
 #
@@ -26,11 +26,16 @@ sys.stdout.reconfigure(encoding='utf-8')
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # 変換の対象。PI パッケージの 16_1_9_methods に入れる仕様と、変数の spec_ref が指すものを揃える
-FILES = ['sdtm-spec.md', 'adam-spec.md', 'ars-spec-index.md',
-         'analysis-population-derivation.md', 'ard-double-coding-spec.md',
-         'engraftment-external-data-spec.md', 'abl1-mutation-external-data-spec.md',
-         'r-pipeline-spec.md', 'label-and-traceability-design.md',
-         'data-handling-decisions.md']
+# docs からの相対パス。仕様は docs/spec/、固定前の作業計画は docs/tmf/spec/ にある
+FILES = ['spec/sdtm-spec.md', 'spec/adam-spec.md', 'spec/ars-spec-index.md',
+         'spec/analysis-population-derivation.md', 'spec/ard-double-coding-spec.md',
+         'spec/engraftment-external-data-spec.md',
+         'spec/abl1-mutation-external-data-spec.md',
+         'spec/r-pipeline-spec.md', 'spec/label-and-traceability-design.md',
+         'spec/data-handling-decisions.md',
+         # adam-spec.md が時間イベントの導出とデータセットの構成の正本として指す2件。
+         # 同梱しないと索引の「仕様書」欄からリンクが出ない（2026-08-24 に納品対象へ加えた）
+         'tmf/spec/efs_plan_v0.5.md', 'tmf/spec/analysis_plan_v0.2.md']
 
 CSS = """
  :root { --line:#e2e2e2; --accent:#004a95; --muted:#767676; --hi:#eef4fb; }
@@ -213,7 +218,10 @@ def main():
     os.makedirs(outdir, exist_ok=True)
 
     have = [f for f in FILES if os.path.exists(os.path.join(REPO, 'docs', f))]
-    names = {f: os.path.splitext(f)[0] + '.html' for f in have}
+    # 出力は1階層に平らに並べる。FILES はサブフォルダ付き（`tmf/spec/efs_plan_v0.5.md`）も
+    # 取るが、md のリンクはファイル名だけで照合するので、キーもファイル名にそろえる
+    names = {f: os.path.basename(os.path.splitext(f)[0]) + '.html' for f in have}
+    by_base = {os.path.basename(f): names[f] for f in have}
 
     def links_for(src):
         """md の中のリンク。同梱する仕様は HTML へ向け、外部 URL はそのまま、
@@ -221,8 +229,8 @@ def main():
         def f(text, url):
             u = url.strip()
             base = u.split('#')[0].rsplit('/', 1)[-1]
-            if base in names:
-                return '<a href="%s%s">%s</a>' % (names[base], u[len(u.split('#')[0]):], text)
+            if base in by_base:
+                return '<a href="%s%s">%s</a>' % (by_base[base], u[len(u.split('#')[0]):], text)
             if u.startswith('#') or re.match(r'^https?://', u):
                 return '<a href="%s"%s>%s</a>' % (html.escape(u),
                                                   '' if u.startswith('#') else

@@ -1,13 +1,13 @@
 /*****************************************************************************************
 program name : srcstamp.sas
 description  : 入力データの版をログへ残す共通マクロ。
-usage        : %include "&repo_root/program/macro/srcstamp.sas";
+usage        : %include "&repo_root/program/sas/macro/srcstamp.sas";
                %srcstamp(sdtm)                ... ライブラリのデータセットの更新時刻と件数
                %filestamp(<パス>, <表示名>)   ... 外部ファイルの更新日時とサイズ
 comment      : Box Drive は同期の都合でファイルを掴んだまま更新することがあり、直前の
                プログラムが書いた版ではなく前回の内容を読む事故が起きうる。読んだ版を
                ログへ残しておけば、突合の食い違いがこれに由来するかを後から切り分けられる。
-               読み取り側の対策は program/macro/load_rawdata.sas の %sasds が持つ。
+               読み取り側の対策は program/sas/macro/load_rawdata.sas の %sasds が持つ。
 *****************************************************************************************/
 
 %macro srcstamp(libs);

@@ -1,9 +1,9 @@
 /*****************************************************************************************
 program name : export-sdtm-metadata.sas
-description  : input/sdtm の変数メタデータ（ドメイン・変数名・型・長さ・順序）を CSV へ出す。
+description  : datasets/sas/sdtm の変数メタデータ（ドメイン・変数名・型・長さ・順序）を CSV へ出す。
                scripts/update-define-xml.ps1 が define.xml を更新するときの入力になる。
 usage        : autoexec.sas を実行した状態で submit する。
-output       : <Box>/input/sdtm/sdtm_variables.csv・sdtm_valuelevel.csv・sdtm_codelist_sync.csv
+output       : <Box>/datasets/sas/sdtm/sdtm_variables.csv・sdtm_valuelevel.csv・sdtm_codelist_sync.csv
 *****************************************************************************************/
 
 title; footnote;
@@ -17,7 +17,7 @@ proc sql;
      order by memname, varnum;
 quit;
 
-filename _o "&base/input/sdtm/sdtm_variables.csv" encoding='utf-8';
+filename _o "&base/datasets/sas/sdtm/sdtm_variables.csv" encoding='utf-8';
 proc export data=_meta outfile=_o dbms=csv replace;
 run;
 filename _o clear;
@@ -48,12 +48,12 @@ filename _o clear;
 %mend testmap;
 %testmap;
 
-filename _v "&base/input/sdtm/sdtm_valuelevel.csv" encoding='utf-8';
+filename _v "&base/datasets/sas/sdtm/sdtm_valuelevel.csv" encoding='utf-8';
 proc export data=_tmap outfile=_v dbms=csv replace;
 run;
 filename _v clear;
 
-%put NOTE: [export-sdtm-metadata] 出力しました: &base/input/sdtm/sdtm_valuelevel.csv;
+%put NOTE: [export-sdtm-metadata] 出力しました: &base/datasets/sas/sdtm/sdtm_valuelevel.csv;
 
 /* CodeList を実データへ合わせる対象変数。受領 define.xml の CodeList は CRF の選択肢を
    写したものなので、SDTM 層で値を扱った変数では実データと食い違う。扱い方は2種類ある。
@@ -103,11 +103,11 @@ filename _v clear;
 %mend clvals;
 %clvals;
 
-filename _c "&base/input/sdtm/sdtm_codelist_sync.csv" encoding='utf-8';
+filename _c "&base/datasets/sas/sdtm/sdtm_codelist_sync.csv" encoding='utf-8';
 proc export data=_clv outfile=_c dbms=csv replace;
 run;
 filename _c clear;
 
-%put NOTE: [export-sdtm-metadata] 出力しました: &base/input/sdtm/sdtm_codelist_sync.csv;
+%put NOTE: [export-sdtm-metadata] 出力しました: &base/datasets/sas/sdtm/sdtm_codelist_sync.csv;
 
-%put NOTE: [export-sdtm-metadata] 出力しました: &base/input/sdtm/sdtm_variables.csv;
+%put NOTE: [export-sdtm-metadata] 出力しました: &base/datasets/sas/sdtm/sdtm_variables.csv;

@@ -5,8 +5,8 @@
 #   2. BOM を除去（SAS の file encoding='utf-8' は BOM を書く）
 #   3. 生成された全ファイルが JSON として読めることを確認
 #
-# 前提：ADaM データセットが Box の input/ads に出来ていること
-#       （program/<試験ID>_SDTMtoADaM.sas を先に実行する）
+# 前提：ADaM データセットが Box の datasets/sas/adam に出来ていること
+#       （program/sas/<試験ID>_SDTMtoADaM.sas を先に実行する）
 #       SDTM 側の同じ処理は scripts/run-sdtm-validation.ps1 が持つ。
 #
 # 使い方：pwsh -File scripts/run-adam-json.ps1
@@ -19,10 +19,10 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 $box  = Get-TrialRoot
 $trialId = (Get-TrialConfig).trial_id
-$jsonDir = Join-Path $box 'input\ads\json'
+$jsonDir = Join-Path $box 'datasets\sas\adam\json'
 
 Write-Host '1. Dataset-JSON の生成'
-Invoke-Sas -Program (Join-Path $repo "program\${trialId}_ADaMtoJSON.sas") `
+Invoke-Sas -Program (Join-Path $repo "program\sas\${trialId}_ADaMtoJSON.sas") `
            -Tag "${trialId}_ADaMtoJSON" -Encoding $Encoding | Out-Null
 
 # SAS の encoding='utf-8' は BOM を書き出すが、jsonlite は BOM 付きを警告する。

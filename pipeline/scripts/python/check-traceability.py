@@ -4,7 +4,7 @@
 # 目視だけでは JS の例外に気付けない（画面は出るが以後クリックが効かない状態になる）ため、
 # 索引を触ったら必ず回す。
 #
-#   python scripts/check-traceability.py                 ... Box の output/traceability.html
+#   python scripts/check-traceability.py                 ... Box の output/deliver/r/traceability.html
 #   python scripts/check-traceability.py <path.html>     ... 任意のファイル
 #
 # 要 playwright（`pip install playwright && playwright install chromium`）。入っていない端末では
@@ -21,7 +21,7 @@ except ImportError:
     sys.exit(0)
 
 HTML = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else \
-    os.path.join(boxpath.trial_dir(), 'output', 'traceability.html')
+    os.path.join(boxpath.trial_dir(), 'output', 'deliver', 'r', 'traceability.html')
 if not os.path.exists(HTML):
     sys.exit(f'{HTML} が無い。先に build-traceability.py を回す。')
 

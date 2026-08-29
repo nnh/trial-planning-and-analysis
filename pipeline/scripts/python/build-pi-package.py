@@ -6,14 +6,14 @@
 # 16.1.2 が CRF の見本、16.1.9 が統計手法の記録、16.2 が被験者データ一覧。重篤な有害事象の
 # 経過（narratives）は E3 が 14.3.3 に置くものなので 14_3_3_narratives へ入れる。トレーサビリティ索引は
 # E3 の構成要素ではないのでルート直下に置き、相対パスで 14章と 16.1.2 を参照する。
-# 設計の正本は docs/label-and-traceability-design.md の「PI 向けパッケージ」。
+# 設計の正本は docs/spec/label-and-traceability-design.md の「PI 向けパッケージ」。
 #
 #   <試験ID>_PI_YYYYMMDD/
 #     README.html                    入口
 #     traceability.html              トレーサビリティ索引（14_tlf と 16_1_2_acrf を相対で参照）
 #     14_tlf/ja/<表番号>.html         図表ごと（日本語。索引が既定で指す）
 #     14_tlf/en/<表番号>.html         図表ごと（英語）
-#     14_tlf/*.html *.rtf            通し読み用と配布用
+#     14_tlf/*.html                  通し読み用
 #     14_3_3_narratives/             重篤な有害事象の経過（PI 向けの読み物。外部提供の対象外）
 #     16_1_2_acrf/<帳票>.html         注釈付き CRF 62帳票（#fieldNN の錨つき）
 #     16_1_9_methods/                define.html（SDTM・ADaM）と仕様の HTML（節に錨つき）
@@ -57,12 +57,40 @@ def copy(src, dst):
     shutil.copy2(src, dst)
 
 
+# 図表 HTML に埋まっている相対リンクは作業用の並び（output/tlf/r-<言語>/ から
+# output/deliver/r/traceability.html を見る形）で書かれている。パッケージでは索引が直下、
+# 図表が 14_tlf/<言語>/ なので、写すときに書き換える。図表を2度描かずに済ませるため、
+# 書き換えはここ1箇所に閉じる（作業用の並びは TLF.R の IX と言語間リンクが正本）。
+TLF_LINK_FIX = [('../../deliver/r/traceability.html', '../../traceability.html'),
+                ('../r-ja/', '../ja/'),
+                ('../r-en/', '../en/')]
+
+
+def copy_tlf(src, dst, pat='*'):
+    """図表 HTML を写し、パッケージ内の並びに合わせてリンクを書き換える"""
+    n = 0
+    for p in sorted(glob.glob(os.path.join(src, pat))):
+        if not os.path.isfile(p):
+            continue
+        b = os.path.basename(p)
+        if re.search(r' \([^()]*@[^()]*\)', b):
+            print(f'  同期の競合の写しを外した: {b}')
+            continue
+        t = open(p, encoding='utf-8').read()
+        for a, c in TLF_LINK_FIX:
+            t = t.replace(a, c)
+        os.makedirs(dst, exist_ok=True)
+        open(os.path.join(dst, b), 'w', encoding='utf-8', newline='\n').write(t)
+        n += 1
+    return n
+
+
 def copy_tree(src, dst, pat='*'):
     n = 0
     for p in sorted(glob.glob(os.path.join(src, pat))):
         if not os.path.isfile(p):
             continue
-        # Box Drive が同期の競合で作る写し（`T_4_5_2 (user@example.com).html`）は
+        # Box Drive が同期の競合で作る写し（`T_4_5_2 (311-system+box.team-k@…).html`）は
         # PI へ渡す形に入れない。消さずに Box へ残しておき、別の端末の変更を取り込んでから
         # 図表を作り直して片付ける（どちらが新しいかを人が判断する必要があるため）
         b = os.path.basename(p)
@@ -229,7 +257,7 @@ def acrf_source(box, given, refresh):
     """aCRF の写しの置き場所を返す。
 
     S3 から毎回落とすと網に依存し、落ちた帳票だけ欠けた配布物ができ得る。Box に写しを
-    1つ持ち（input/acrf）、パッケージはそこから写す。作業用の索引（output/traceability.html）
+    1つ持ち（input/acrf）、パッケージはそこから写す。作業用の索引（output/deliver/r/traceability.html）
     も同じ写しを相対パスで見るので、写しが aCRF のローカル正本になる。
     """
     if given:
@@ -277,7 +305,7 @@ def copy_narratives(box, dest):
     """SAE の経過記述（E3 14.3.3）を写して、節の説明を1枚添える。
 
     経過記述は施設が CRF の SAE 報告書へ入力した日本語の自由記述で、解析には使わないため
-    SDTM・ADaM・define.xml・共有パッケージには載せていない（docs/sdtm-spec.md 3.16）。
+    SDTM・ADaM・define.xml・共有パッケージには載せていない（docs/spec/sdtm-spec.md 3.16）。
     PI へは読み物として渡すので、E3 が「死亡・その他の重篤な有害事象の記述」を置く 14.3.3
     に入れる。外部提供の対象外である旨は、この節の説明と README の両方に出す。
     """
@@ -358,8 +386,13 @@ __SUBJ__
 
 <h2>作り直すには</h2>
 <p><code>reproduce/</code> に R のプログラムと仕様ファイルが入っています。R 4.2 以降で
-次の順に実行します（依存は <code>readr</code>・<code>dplyr</code>・<code>survival</code>・
-<code>jsonlite</code> のみ）。</p>
+動きます。依存は <code>readr</code>・<code>dplyr</code>・<code>survival</code>・
+<code>jsonlite</code>・<code>haven</code> で、使った版は <code>renv.lock</code> にあります。
+<code>reproduce/</code> を起点に R を開き、最初に一度だけ次を実行すると同じ版が揃います。</p>
+<ul>
+<li><code>renv::restore()</code></li>
+</ul>
+<p>その後、次の順に実行します。</p>
 <ul>
 <li><code>__TRIAL___CSVtoSDTM.R</code> → <code>__TRIAL___SDTMtoADaM.R</code>
     → <code>__TRIAL___ARD.R</code> → <code>__TRIAL___TLF.R</code></li>
@@ -376,7 +409,7 @@ __SUBJ__
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--out', help='パッケージを作る場所（既定は Box の output/）')
+    ap.add_argument('--out', help='パッケージを作る場所（既定は Box の output/deliver/r/）')
     ap.add_argument('--with-subject-data', action='store_true',
                     help='被験者単位のデータ（SDTM・ADaM・受領CSV・一覧）も入れる')
     ap.add_argument('--acrf-dir', help='aCRF を取得済みのフォルダから写す（S3 へ行かない）')
@@ -387,29 +420,52 @@ def main():
     box = boxpath.trial_dir()
     out = box if not a.out else a.out
     day = datetime.date.today().strftime('%Y%m%d')
-    pkg = os.path.join(a.out if a.out else os.path.join(box, 'output'),
+    # 納品パッケージは output/deliver/<実装系統>/ に置く。図表は R 系を納品するので r。
+    # 方針の正本は nnh/trial-planning-and-analysis の pipeline/analysis-pipeline-plan.md
+    pkg = os.path.join(a.out if a.out else os.path.join(box, 'output', 'deliver', 'r'),
                        boxpath.trial_id() + f'_PI_{day}')
     if os.path.exists(pkg):
         shutil.rmtree(pkg)
     os.makedirs(pkg)
     print(f'{pkg} を作る')
 
+    # 以前の版は 旧版/ へ退避する。直下に最新の1組だけを置いて、どれが最新かを一目で
+    # 分かるようにする（削除ではない）。check-pi-package.py は直下だけを見る
+    base_dir = os.path.dirname(pkg)
+    arc = os.path.join(base_dir, '旧版')
+    moved = 0
+    for p in sorted(glob.glob(os.path.join(base_dir, boxpath.trial_id() + '_PI_*'))):
+        if os.path.abspath(p) == os.path.abspath(pkg) or not os.path.isdir(p):
+            continue
+        os.makedirs(arc, exist_ok=True)
+        dst = os.path.join(arc, os.path.basename(p))
+        if os.path.exists(dst):
+            shutil.rmtree(dst)
+        shutil.move(p, dst)
+        moved += 1
+    if moved:
+        print(f'  以前の版 {moved} 件を {arc} へ退避した')
+
     # --- 14章 図表 ---
     n_fig = {}
     for lang in ('ja', 'en'):
-        src = os.path.join(box, 'output', 'tlf', lang)
+        src = os.path.join(box, 'output', 'tlf', 'r-' + lang)
         if not os.path.isdir(src):
             sys.exit(f'{src} が無い。先に Rscript program/r/{boxpath.trial_id()}_TLF.R を回す。')
-        n_fig[lang] = copy_tree(src, os.path.join(pkg, '14_tlf', lang), '*.html')
+        # 図表ごとの HTML だけを拾う。同じディレクトリに通し読み HTML も置くため
+        n_fig[lang] = (copy_tlf(src, os.path.join(pkg, '14_tlf', lang), 'T_*.html')
+                       + copy_tlf(src, os.path.join(pkg, '14_tlf', lang), 'F_*.html'))
     n_doc = 0
-    for p in sorted(glob.glob(os.path.join(box, 'output',
-                                           boxpath.trial_id() + '_TLF_*_r.html')) +
-                    glob.glob(os.path.join(box, 'output', boxpath.trial_id() + '_TLF_*_r.rtf'))):
+    docs = []
+    for lang in ('ja', 'en'):
+        d = os.path.join(box, 'output', 'tlf', 'r-' + lang)
+        docs += glob.glob(os.path.join(d, boxpath.trial_id() + '_TLF_*_r.html'))
+    for p in sorted(docs):
         # 配布物の名前から実装系統の印（_r）を落とす
         base = os.path.basename(p).replace('_r.', '.')
         copy(p, os.path.join(pkg, '14_tlf', base))
         n_doc += 1
-    print(f'  14_tlf: 図表ごと ja {n_fig["ja"]} / en {n_fig["en"]}、通し読みと RTF {n_doc}')
+    print(f'  14_tlf: 図表ごと ja {n_fig["ja"]} / en {n_fig["en"]}、通し読み {n_doc}')
 
     # --- 14.3.3 重篤な有害事象の経過（narratives） ---
     n_nar, n_ev, n_sub = copy_narratives(box, os.path.join(pkg, '14_3_3_narratives'))
@@ -430,9 +486,9 @@ def main():
     # --- 16.1.9 統計手法の記録 ---
     m = os.path.join(pkg, '16_1_9_methods')
     n_m = 0
-    for src, dst, lay in ((os.path.join(box, 'input', 'sdtm', 'define.html'),
+    for src, dst, lay in ((os.path.join(box, 'datasets', 'sas', 'sdtm', 'define.html'),
                            'define_sdtm.html', 'sdtm'),
-                          (os.path.join(box, 'input', 'ads', 'define.html'),
+                          (os.path.join(box, 'datasets', 'sas', 'adam', 'define.html'),
                            'define_adam.html', 'adam')):
         if os.path.exists(src):
             # define.html はデータセット（Dataset-JSON）へ隣のファイルとしてリンクしている。
@@ -458,7 +514,7 @@ def main():
     before = set(glob.glob(os.path.join(m, '*.html')))
     sh(sys.executable, os.path.join(SCRIPTS, 'build-spec-html.py'), '--out-dir', m, '--quiet')
     n_m += len(set(glob.glob(os.path.join(m, '*.html'))) - before)
-    for p in sorted(glob.glob(os.path.join(box, 'output', 'QC', 'tlf_compare_*.csv'))):
+    for p in sorted(glob.glob(os.path.join(box, 'output', 'compare', 'tlf_compare_*.csv'))):
         copy(p, os.path.join(m, os.path.basename(p)))
         n_m += 1
     print(f'  16_1_9_methods: {n_m} ファイル')
@@ -466,7 +522,7 @@ def main():
     # --- data（ARD は集計値なので既定で入れる） ---
     n_d = 0
     for name in ('ard_cards.csv', 'ard_cards_r.csv'):
-        p = os.path.join(box, 'input', 'ads', name)
+        p = os.path.join(box, 'datasets', 'sas', 'adam', name)
         if os.path.exists(p):
             copy(p, os.path.join(pkg, 'data', 'ard', name))
             n_d += 1
@@ -474,35 +530,78 @@ def main():
 
     # --- reproduce（R 一式と仕様ファイル） ---
     n_r = copy_tree(os.path.join(REPO, 'program', 'r'), os.path.join(pkg, 'reproduce'), '*.R')
-    copy(os.path.join(REPO, 'program', 'r', 'renv.lock'),
-         os.path.join(pkg, 'reproduce', 'renv.lock'))
+    # 版の固定。lock だけでなく renv の活性化2ファイルも入れる。配った先で reproduce/ を
+    # 起点に R を開くと renv が自分を取ってきて .libPaths を差し替えるので、
+    # renv::restore() だけで lock と同じ版が揃う（PI に renv の導入手順を要求しない）
+    copy(os.path.join(REPO, 'renv.lock'), os.path.join(pkg, 'reproduce', 'renv.lock'))
+    copy(os.path.join(REPO, '.Rprofile'), os.path.join(pkg, 'reproduce', '.Rprofile'))
+    copy(os.path.join(REPO, 'renv', 'activate.R'),
+         os.path.join(pkg, 'reproduce', 'renv', 'activate.R'))
+    # 機械が読む定義の正本は docs/metadata/。配布形態では input/spec/ へ平らに写す
+    # （R 側は phall_spec() が両方を探す）
     for name in ('tlf-index.csv', 'label-catalog.csv', 'variable-map.csv',
-                 'crf-field-map.csv', 'crf-option-map.csv'):
-        copy(os.path.join(REPO, 'docs', name),
+                 'crf-field-map.csv', 'crf-option-map.csv',
+                 'reference-table-rows.csv', 'reference-values.csv',
+                 'mr-timepoint.csv'):
+        copy(os.path.join(REPO, 'docs', 'metadata', name),
+             os.path.join(pkg, 'reproduce', 'input', 'spec', name))
+    for name in ('ta.csv', 'te.csv', 'ti.csv', 'ts.csv', 'tv.csv'):
+        copy(os.path.join(REPO, 'docs', 'metadata', 'trial-design', name),
              os.path.join(pkg, 'reproduce', 'input', 'spec', name))
     # R のコメントは仕様書を `docs/<名前>.md` で指す。R を回す起点が reproduce/ なので、
     # その直下に docs/ を置けば配った先でも同じ相対パスで辿れる（16_1_9_methods の HTML は
     # 読み物としての同じ内容で、正本はこの md。CLAUDE.md「文書の正本」）。同梱するものは
     # R の中身から集める。一覧を別に持つとコメントを直したときにズレるため。
+    # 同梱した md が指す md も辿る。`docs/spec/adam-spec.md` は時間イベントの導出とデータセットの
+    # 構成の正本として `docs/tmf/spec/efs_plan_v0.5.md`・`analysis_plan_v0.2.md` を指しており、
+    # 同梱しないとパッケージの中で参照先が無くなる（2026-08-23 に納品対象へ加えると決めた）。
+    # 参照の書き方は本文中の `docs/<パス>.md` と md のリンク `](<パス>.md)` の2通りある。
     n_doc, lost = 0, []
+
+    def md_refs(text, here):
+        """docs からの相対パスの一覧を返す。
+
+        R のコメントは `docs/<パス>.md` と書く（docs からの相対）。md 同士のリンクは
+        `](<パス>.md)` で、そのファイルのあるフォルダからの相対なので、docs からの
+        相対へ直してから辿る（docs を階層化したので両者が一致しない）。
+        """
+        out = [x.lstrip('./') for x in re.findall(r'docs/([\w.\-/]+\.md)', text)]
+        if here is not None:
+            for x in re.findall(r'\]\(([\w.\-/]+\.md)\)', text):
+                out.append(os.path.normpath(os.path.join(here, x)).replace(os.sep, '/'))
+        return out
+
+    pending = []
     for p in sorted(glob.glob(os.path.join(pkg, 'reproduce', '*.R'))):
-        for name in sorted(set(re.findall(r'docs/([\w.\-]+\.md)',
-                                          open(p, encoding='utf-8', errors='replace').read()))):
-            src = os.path.join(REPO, 'docs', name)
-            if not os.path.exists(src):
-                lost.append(name)
-            elif not os.path.exists(os.path.join(pkg, 'reproduce', 'docs', name)):
-                copy(src, os.path.join(pkg, 'reproduce', 'docs', name))
-                n_doc += 1
-    print(f'  reproduce: R {n_r} 本 + 仕様 5 ファイル + docs {n_doc} ファイル'
-          + (f'（docs/ に無い参照 {sorted(set(lost))}）' if lost else ''))
+        pending += md_refs(open(p, encoding='utf-8', errors='replace').read(), None)
+    seen = set()
+    while pending:
+        name = pending.pop(0).lstrip('./')
+        if name in seen:
+            continue
+        seen.add(name)
+        src = os.path.join(REPO, 'docs', name)
+        if not os.path.exists(src):
+            lost.append(name)
+            continue
+        dst = os.path.join(pkg, 'reproduce', 'docs', name)
+        if not os.path.exists(dst):
+            copy(src, dst)
+            n_doc += 1
+        pending += md_refs(open(src, encoding='utf-8', errors='replace').read(),
+                           os.path.dirname(name))
+    # 同梱しなかった参照は報告するが、これは異常ではない。akiko-office の環境文書
+    # （`methods/…`・`sas-environment.md` など）とリポジトリルートの作業記録
+    # （`action-items.md`）は納品対象外なので、docs/ に無いのが正しい
+    print(f'  reproduce: R {n_r} 本 + 仕様 13 ファイル + docs {n_doc} ファイル'
+          + (f'（同梱しなかった参照 {len(set(lost))} 件: {sorted(set(lost))}）' if lost else ''))
 
     # --- 被験者単位のデータ（明示の指定があるときだけ） ---
     subj = ''
     if a.with_subject_data:
         c = 0
-        for lay, src in (('sdtm', os.path.join(box, 'input', 'sdtm', 'json')),
-                         ('adam', os.path.join(box, 'input', 'ads', 'json'))):
+        for lay, src in (('sdtm', os.path.join(box, 'datasets', 'sas', 'sdtm', 'json')),
+                         ('adam', os.path.join(box, 'datasets', 'sas', 'adam', 'json'))):
             if os.path.isdir(src):
                 c += copy_tree(src, os.path.join(pkg, 'data', lay), '*.json')
         for src, dst in ((os.path.join(box, 'input', 'rawdata'),

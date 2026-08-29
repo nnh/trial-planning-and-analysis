@@ -1,7 +1,7 @@
 # check-tlf-index.py
 #
-# docs/tlf-index.csv（図表の宣言。SAS系・R系・トレーサビリティ索引の3つが読む正本）の健全性を見る。
-# 設計は docs/tlf-declaration-design.md。
+# docs/metadata/tlf-index.csv（図表の宣言。SAS系・R系・トレーサビリティ索引の3つが読む正本）の健全性を見る。
+# 設計は docs/spec/tlf-declaration-design.md。
 #
 #   - 列の並びが SAS 側の input 文（%tlf_read）と同じか
 #   - seq に重複・欠番が無いか
@@ -20,8 +20,8 @@ import boxpath
 sys.stdout.reconfigure(encoding='utf-8')
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-IDX = os.path.join(REPO, 'docs', 'tlf-index.csv')
-SAS = os.path.join(REPO, 'program', 'macro', 'tlf_ops.sas')
+IDX = os.path.join(REPO, 'docs', 'metadata', 'tlf-index.csv')
+SAS = os.path.join(REPO, 'program', 'sas', 'macro', 'tlf_ops.sas')
 RSRC = os.path.join(REPO, 'program', 'r', boxpath.trial_id() + '_TLF.R')
 
 COLS = ['seq', 'lblid', 'display', 'analysis_id', 'output_id', 'filter', 'groups',
@@ -35,7 +35,10 @@ REQ = {'tab_km': ['analysis_id'], 'tab_prop': ['analysis_id'], 'tab_cif': ['anal
        'tab_prop_tp': ['output_id', 'levels'], 'tab_bg': ['output_id'],
        'tab_count': ['output_id'], 'tab_crs': ['output_id', 'levels'],
        'tab_aegr': ['output_id'], 'tab_list': ['vars', 'labels'],
-       'tab_mrlist': [], 'fig_km': ['paramcd']}
+       'tab_mrlist': [],
+       # tab_ref は行の定義を docs/metadata/reference-table-rows.csv、文献値を reference-values.csv が持つ
+       'tab_ref': [],
+       'fig_km': ['paramcd']}
 
 # マクロ呼び出しの引数として渡せない文字。区切りには | ~ : を使う
 BAD = {',': 'カンマ', ';': 'セミコロン', '&': 'アンパサンド', '%': 'パーセント'}
@@ -71,7 +74,7 @@ r_disp = set(re.findall(r'^d_((?:tab|fig)_[a-z0-9_]+)\s*<-\s*function',
 
 # 表題（label-catalog の kind=title）
 titles = set()
-with open(os.path.join(REPO, 'docs', 'label-catalog.csv'), encoding='utf-8-sig',
+with open(os.path.join(REPO, 'docs', 'metadata', 'label-catalog.csv'), encoding='utf-8-sig',
           newline='') as f:
     for r in csv.DictReader(f):
         if r['kind'] == 'title':
@@ -100,7 +103,7 @@ box = boxpath.trial_dir(required=False)
 if not box:
     print('Box が無いため ARD との突合は飛ばした')
 else:
-    p = os.path.join(box, 'input', 'ads', 'ard_cards.csv')
+    p = os.path.join(box, 'datasets', 'sas', 'ard', 'ard_cards.csv')
     ids, outs = set(), set()
     if os.path.exists(p):
         with open(p, encoding='utf-8-sig', newline='') as f:
@@ -113,11 +116,78 @@ else:
         if r['output_id'] and r['output_id'] not in outs:
             warn.append(f"{r['lblid']} が指す図表グループ {r['output_id']} が ARD に無い")
 
+    # tab_bg の行が一意に決まるか。item_var で選んだ軸だけでは行を区別できず、
+    # 同じ行ラベルが並んでいた表が3つあった（Out-5.4.7.2・5.4.7.4・5.4.7.5。2026-08-23）。
+    # 同じ (行項目, 水準) に複数の解析が当たるなら、item_var に軸を足す必要がある。
+    rows_by_out = collections.defaultdict(list)
+    with open(p, encoding='utf-8-sig', newline='') as f:
+        for a in csv.DictReader(f):
+            rows_by_out[a['output_id']].append(a)
+    COL = {'VARIABLE': 'variable', 'GROUP1L': 'group1_level'}
+    for r in idx:
+        if r['display'] != 'tab_bg':
+            continue
+        axes = (r['item_var'] or 'VARIABLE').split('|')
+        if any(v not in COL for v in axes):
+            err.append(f"{r['lblid']} の item_var に未対応の軸がある: {r['item_var']}")
+            continue
+        seen = collections.defaultdict(set)
+        for a in rows_by_out.get(r['output_id'], []):
+            seen[tuple(a[COL[v]] for v in axes) + (a['variable_level'],)].add(a['analysis_id'])
+        dup = {k: sorted(v) for k, v in seen.items() if len(v) > 1}
+        if dup:
+            k, v = next(iter(dup.items()))
+            err.append(f"{r['lblid']}（tab_bg）の行が一意でない。item_var={r['item_var']} "
+                       f"では {len(dup)} 組の行が重なる（例 {k} に {len(v)} 解析: "
+                       f"{'、'.join(v[:3])}…）。item_var に軸を足すこと")
+
+    # 水準の並び順（label-catalog の kind=level の order 列）の混在を止める。
+    # 番号を入れるなら、その水準集合の全部に入れる。一部にしか無いと、番号の無い水準が
+    # 欠測（SAS では最小値、R では 9999）として意図しない位置に来る（2026-08-23）。
+    lvord = {}
+    with open(os.path.join(REPO, 'docs', 'metadata', 'label-catalog.csv'), encoding='utf-8-sig',
+              newline='') as f:
+        for a in csv.DictReader(f):
+            if a['kind'] == 'level':
+                lvord[a['key']] = (a.get('order') or '').strip()
+    sets = collections.defaultdict(set)
+    with open(p, encoding='utf-8-sig', newline='') as f:
+        for a in csv.DictReader(f):
+            if a['context'] == 'categorical':
+                sets[(a['analysis_id'], a['variable'], a['group1_level'])].add(
+                    a['variable_level'])
+    mixed = {}
+    for k, lv in sets.items():
+        has = {x for x in lv if lvord.get(x)}
+        if has and has != lv:
+            mixed[tuple(sorted(lv))] = (sorted(has), sorted(lv - has))
+    for lv, (has, lack) in sorted(mixed.items()):
+        err.append(f"水準 {'・'.join(lv)} は order が混在している"
+                   f"（あり: {'・'.join(has)} / なし: {'・'.join(lack)}）。"
+                   f"label-catalog.csv の kind=level に、この集合の全水準へ order を入れるか、"
+                   f"1つも入れないかにすること")
+
 print('表示型: ' + ' '.join(f'{k}={v}' for k, v in
                             collections.Counter(r['display'] for r in idx).most_common()))
 for w in warn:
     print('WARN:', w)
 for e in err:
     print('ERROR:', e)
+
+# 表示文言のキーの名前空間。R の lvl() は kind=level と kind=bgitem を同じ名前空間で引く
+# （SAS は水準を _lvcat、行項目を $bgitem 出力形式で分けている）。同じキーが両方にあると
+# R だけが片方を拾い、SAS-R の突合で表示名の差として出る（2026-08-25 に CHR・CMR で発生）
+_lab = os.path.join(REPO, 'docs', 'metadata', 'label-catalog.csv')
+if os.path.exists(_lab):
+    with open(_lab, encoding='utf-8-sig', newline='') as f:
+        _rows = list(csv.DictReader(f))
+    _lv = {r['key'] for r in _rows if r['kind'] == 'level'}
+    _bg = {r['key'] for r in _rows if r['kind'] == 'bgitem'}
+    _dup = sorted(_lv & _bg)
+    if _dup:
+        err.append('label-catalog.csv の kind=level と kind=bgitem で同じキーがある: '
+                   + '・'.join(_dup)
+                   + '（R の lvl() は同じ名前空間で引くので、どちらかを別名にすること）')
+
 print(f'ERROR {len(err)} 件 / WARN {len(warn)} 件')
 sys.exit(1 if err else 0)

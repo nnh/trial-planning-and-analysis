@@ -1,8 +1,8 @@
 # build-crf-field-map.py
 #
 # Ptosh の eCRF 構造定義 JSON から、帳票・レコード・項目の対応表を作る。
-#   docs/crf-field-map.csv    1行が1項目（レコードに載る項目は所属レコードと SDTM 変数つき）
-#   docs/crf-option-map.csv   選択肢セットの値（コードと表示名）
+#   docs/metadata/crf-field-map.csv    1行が1項目（レコードに載る項目は所属レコードと SDTM 変数つき）
+#   docs/metadata/crf-option-map.csv   選択肢セットの値（コードと表示名）
 #
 # Ptosh の JSON が CRF 側の正本である。1つの帳票が SDTM の何レコードを作るか、各レコードの
 # どの変数がどの項目から来るか、どの変数に固定値が入るかを、そのまま持っている。
@@ -33,8 +33,8 @@ import boxpath
 sys.stdout.reconfigure(encoding='utf-8')
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT = os.path.join(REPO, 'docs', 'crf-field-map.csv')
-OUT_OPT = os.path.join(REPO, 'docs', 'crf-option-map.csv')
+OUT = os.path.join(REPO, 'docs', 'metadata', 'crf-field-map.csv')
+OUT_OPT = os.path.join(REPO, 'docs', 'metadata', 'crf-option-map.csv')
 
 # ドメイン（変数がどのデータセットにあるか）は variable-map.csv が持つ事実なので写さない。
 # 参照先は変数名と、その変数が属するレコードだけを持つ。
@@ -56,7 +56,7 @@ def sdtm_vars():
     取らないものがある。どちらが実在するかは variable-map が持つ事実なので、それで決める。
     """
     have = collections.defaultdict(set)
-    with open(os.path.join(REPO, 'docs', 'variable-map.csv'), encoding='utf-8-sig',
+    with open(os.path.join(REPO, 'docs', 'metadata', 'variable-map.csv'), encoding='utf-8-sig',
               newline='') as f:
         for r in csv.DictReader(f):
             if r['layer'] in ('sdtm', 'pv'):
@@ -112,7 +112,7 @@ def main():
                 if suf == '_CO':
                     # Ptosh は SAE の経過記述を CO（Comments）の別レコードとして持つ。本試験は
                     # CO を SDTM から外して PV データ（AE_CO）へ出したので、その名前で解決する
-                    # （docs/sdtm-spec.md §3.16）
+                    # （docs/spec/sdtm-spec.md §3.16）
                     d_, v_, suf = dom + '_CO', 'COVAL', ''
                 if suf:
                     v_ = next((c for c in (d_ + suf, suf) if c in have.get(d_, ())), '')

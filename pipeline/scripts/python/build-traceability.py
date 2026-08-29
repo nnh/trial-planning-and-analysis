@@ -23,7 +23,7 @@
 #   docs/metadata/crf-field-map.csv         帳票×項目と SDTM の対応（aCRF から生成）
 #   docs/metadata/label-catalog.csv         図表の表題・水準・解析項目の表示名
 #   docs/tmf/aCRF/*-acrf.csv       aCRF の帳票名と URL（帳票の並び順もこれが持つ）
-#   program/<試験ID>_TLF.sas 図表の描画宣言（表番号と解析IDの対応）
+#   program/sas/<試験ID>_TLF.sas 図表の描画宣言（表番号と解析IDの対応）
 #   Box datasets/sas/ard/ard_cards.csv    ARD の実データ（結果値まで）
 #   Box datasets/sas/adam/json/*.json      ADaM の PARAMCD・--SPID の実値（値レベルの条件の引き継ぎ用）
 #   Box input/rawdata/*.csv        --SPID の実値（ドメインごと）

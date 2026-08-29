@@ -2,14 +2,14 @@
 program name : load_rawdata.sas
 description  : Box の input/rawdata・input/ext から SDTM 相当 CSV を WORK へ取り込む共通マクロ。
                CSVtoSASDS と QC プログラムの双方から %include して使う（読み込み仕様の単一正本）。
-usage        : %include "&repo_root/program/macro/load_rawdata.sas";
+usage        : %include "&repo_root/program/sas/macro/load_rawdata.sas";
                %require_base;
                %import_all;
 comment      : 読み込むドメインを増減するときは &raw_dom / &ext_dom の2行だけを直す。
 *****************************************************************************************/
 
 /* 入力データの版をログへ残す共通マクロ（%filestamp・%srcstamp）*/
-%include "&repo_root/program/macro/srcstamp.sas";
+%include "&repo_root/program/sas/macro/srcstamp.sas";
 
 %global cwd raw_dom ext_dom;
 

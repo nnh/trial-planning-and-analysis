@@ -4,7 +4,7 @@
 # 同じスクリプトが動くようにするための小さな共通部品。
 #
 # 解決の順序
-#   1. 環境変数 TRIAL_BOX_ROOT（明示指定。他の場所に置いた複製を見るときに使う）
+#   1. 環境変数 AKIKO_BOX_ROOT（明示指定。他の場所に置いた複製を見るときに使う）
 #   2. macOS の Box Drive        ~/Library/CloudStorage/Box-Box
 #   3. 旧 Box Drive・手動同期     ~/Box
 #   4. Windows の Box Drive      %USERPROFILE%\Box
@@ -14,15 +14,15 @@
 import json
 import os
 
-# 試験固有の値は docs/trial.json だけが持つ。ここを差し替えれば同じスクリプトが
+# 試験固有の値は docs/metadata/trial.json だけが持つ。ここを差し替えれば同じスクリプトが
 # 別の試験で動く。boxpath を import する側は trial_id() と trial_dir() だけを使い、
 # 試験名をコードに書かない。
 CONFIG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                      'docs', 'trial.json')
+                      'docs', 'metadata', 'trial.json')
 
 
 def config():
-    """docs/trial.json を読む。無ければ何が足りないかを言って止まる。"""
+    """docs/metadata/trial.json を読む。無ければ何が足りないかを言って止まる。"""
     try:
         with open(CONFIG, encoding='utf-8') as f:
             return json.load(f)
@@ -45,7 +45,7 @@ TRIAL = os.path.join(*config()['box_path'])
 def candidates():
     home = os.path.expanduser('~')
     out = []
-    env = os.environ.get('TRIAL_BOX_ROOT')
+    env = os.environ.get('AKIKO_BOX_ROOT')
     if env:
         out.append(env)
     out.append(os.path.join(home, 'Library', 'CloudStorage', 'Box-Box'))
@@ -74,5 +74,5 @@ def trial_dir(required=True):
     if not required:
         return None
     raise SystemExit(
-        'Box の試験フォルダが見つからない。Box Drive を入れるか、TRIAL_BOX_ROOT で場所を指定する。\n'
+        'Box の試験フォルダが見つからない。Box Drive を入れるか、AKIKO_BOX_ROOT で場所を指定する。\n'
         '探した場所:\n  ' + '\n  '.join(candidates()))

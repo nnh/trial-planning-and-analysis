@@ -5,32 +5,27 @@
 #
 # 入力  : 受領 define.xml（Box の固定データ内。読み取りのみ）
 #         SDTM データセットの変数メタデータ CSV（scripts/export-sdtm-metadata.sas が出す）
-# 出力  : Box input/sdtm/define.xml、同 define2-0-0.xsl、変数ラベル CSV
+# 出力  : Box datasets/sas/sdtm/define.xml、同 define2-0-0.xsl、変数ラベル CSV
 #
 # 役割分担：変数の型・長さ・順序は SAS データセットが正本、
 #           ラベル・Origin・CodeList は define.xml が正本。
-# 使い方  : pwsh -File scripts/update-define-xml.ps1 -SrcDir 'input\rawdata\<受領日フォルダ>\<define.xml のあるフォルダ>'
-#           -SrcDir は受領データの日付・フォルダ名を含み試験ごとに異なるため、必須引数にする。
-
-param([Parameter(Mandatory)][string]$SrcDir)
+# 使い方  : pwsh -File scripts/update-define-xml.ps1
 
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'sas-common.ps1')
 
-$trialId  = (Get-TrialConfig).trial_id
-$box      = Get-TrialRoot
-$srcDir   = Join-Path $box $SrcDir
-$outDir   = Join-Path $box 'input\sdtm'
+$box      = Join-Path $env:USERPROFILE 'Box\Stat\Trials\JALSG\<試験ID>'
+$srcDir   = Join-Path $box 'input\rawdata\20260722 fixed data\PhALL219_define_260721_1002'
+$outDir   = Join-Path $box 'datasets\sas\sdtm'
 $metaCsv  = Join-Path $outDir 'sdtm_variables.csv'
 $labelCsv = Join-Path $outDir 'sdtm_labels.csv'
 
 if (-not (Test-Path $metaCsv)) { throw "変数メタデータがありません: $metaCsv （先に export-sdtm-metadata.sas を実行）" }
 
 # ---- IG に無い変数のラベル -------------------------------------------------------------
-# 変数ラベルの正本は SDTM IG（docs/sdtmig-3-2-variable-roles.csv）。ここに置くのは IG の
+# 変数ラベルの正本は SDTM IG（docs/metadata/external/sdtmig-3-2-variable-roles.csv）。ここに置くのは IG の
 # 一覧に載らない変数だけにする。IG の値を写すと、ドメインで違うラベル（--STRESC など）を
 # 取り違えるうえ、Library の版が変わったときにずれる。
-# CO は本試験では作らない（AE 由来の全行を input/pv へ出したため）が、他の試験で
+# CO は本試験では作らない（AE 由来の全行を datasets/sas/pv へ出したため）が、他の試験で
 # 使うことがあるので残す。
 $lab = @{
   'RDOMAIN' = 'Related Domain Abbreviation'
@@ -95,7 +90,7 @@ function Get-DataType($row) {
 # SDTM IG 3.2 の Role と Label。ItemRef の Role と、受領 define.xml に無い変数の
 # ラベルに使う。ラベルの正本はこの CSV で、スキル cdisc-define-xml の
 # export-sdtm-metadata.py が CDISC CORE のキャッシュ（元は CDISC Library）から作る。
-$roleCsv = Join-Path (Split-Path $PSScriptRoot -Parent) 'docs\sdtmig-3-2-variable-roles.csv'
+$roleCsv = Join-Path (Split-Path $PSScriptRoot -Parent) 'docs\metadata\external\sdtmig-3-2-variable-roles.csv'
 if (-not (Test-Path $roleCsv)) {
   throw "変数の Role 一覧がありません: $roleCsv （先に scripts/export-sdtmig-roles.py を実行）"
 }
@@ -199,7 +194,7 @@ foreach ($g in $byDom) {
     $vlab = $igLabelOf["$dom.$name"]
     if (-not $vlab) { $vlab = $lab[$name] }
     if (-not $vlab) {
-      throw "ラベル未定義の変数があります: $dom.$name（docs/sdtmig-3-2-variable-roles.csv を確認するか、スクリプトの `$lab に追記）"
+      throw "ラベル未定義の変数があります: $dom.$name（docs/metadata/external/sdtmig-3-2-variable-roles.csv を確認するか、スクリプトの `$lab に追記）"
     }
     $oid = "IT.$dom.$name"
     $id  = $x.CreateElement('ItemDef', $ns)
@@ -267,7 +262,7 @@ foreach ($ig in $mdv.ItemGroupDef) {
 }
 
 # FINDINGS ABOUT は Define-XML 2.1 で追加された値で、2.0 の値セットには無い。2.0 では
-# FINDINGS を使う（docs/sdtm-conformance-findings-20260815.md D-1）。
+# FINDINGS を使う（docs/records/sdtm-conformance-findings-20260815.md D-1）。
 foreach ($ig in $mdv.ItemGroupDef) {
   if ($ig.GetAttribute('Class', $nsd) -eq 'FINDINGS ABOUT') {
     $ig.SetAttribute('Class', $nsd, 'FINDINGS') | Out-Null
@@ -280,7 +275,7 @@ foreach ($ig in $mdv.ItemGroupDef) {
 # 値を入れており、Description が空になっている。SASFieldName は SAS の変数名の規則
 # （空白不可・8文字以内）に従う必要があり、Description は値の意味を持つべきである
 # （同 D-1）。FA は SDTM 層で FATESTCD を是正しているので、受領時の値のままの ItemDef を
-# 落とし、実データにあって define に無い値を足す（docs/sdtm-spec.md 3.6）。
+# 落とし、実データにあって define に無い値を足す（docs/spec/sdtm-spec.md 3.6）。
 $vlmCsv = Join-Path $outDir 'sdtm_valuelevel.csv'
 if (-not (Test-Path $vlmCsv)) {
   throw "値水準メタデータの対応表がありません: $vlmCsv （先に scripts/export-sdtm-metadata.sas を実行）"
@@ -496,7 +491,7 @@ if ($clOrphan -gt 0) {
 
 # DSCAT のコードリストに OTHER EVENT を足す。CSVtoSDTM.sas が DSSPID='tki_change1'
 # の21件を OTHER EVENT へ置き換えるが、受領 define.xml のコードリストは
-# DISPOSITION EVENT の1値しか持たない（docs/sdtm-conformance-findings-20260815.md A-2）。
+# DISPOSITION EVENT の1値しか持たない（docs/records/sdtm-conformance-findings-20260815.md A-2）。
 $dscatDef = $mdv.ItemDef | Where-Object { $_.Name -eq 'DSCAT' } | Select-Object -First 1
 if ($dscatDef -and $dscatDef.CodeListRef) {
   $clOid = $dscatDef.CodeListRef.CodeListOID
@@ -520,11 +515,11 @@ if ($dscatDef -and $dscatDef.CodeListRef) {
 # Define-XML 2.0 は1つの CodeList に EnumeratedItem と CodeListItem を混在できないので、
 # 対象の CodeList は全項目を CodeListItem に置き換える。
 #
-# 2026-08-20 変更：Decode の正本を docs/codelist-decode.csv に移した。それまでは Y/N/NA と
-# SEX の対応をハッシュで、--TOXGR を "Grade $v" の規則で、VISITNUM を docs/trial-design/tv.csv
+# 2026-08-20 変更：Decode の正本を docs/metadata/codelist-decode.csv に移した。それまでは Y/N/NA と
+# SEX の対応をハッシュで、--TOXGR を "Grade $v" の規則で、VISITNUM を docs/metadata/trial-design/tv.csv
 # の参照でこのスクリプトが持っていた。受領 define.xml が値・CodeListRef の割り当ての正本で
 # ある一方、英語の Decode はどこにも無いので、その差分だけを CSV に持つ
-# （docs/label-and-traceability-design.md の決定事項）。スクリプトは処理だけを持つ。
+# （docs/spec/label-and-traceability-design.md の決定事項）。スクリプトは処理だけを持つ。
 # --TESTCD の Decode は CSV に写さない。対応する --TEST は実データ（sdtm_valuelevel.csv）から
 # 来るため、データが変われば Decode も変わる。CSV に写すと二重持ちになってズレる。実データに
 # 無い --TESTCD（LB の PATHOGEN）の1件だけ CSV が穴埋めする。
@@ -535,10 +530,10 @@ $decCsv = Join-Path (Split-Path $PSScriptRoot -Parent) 'docs\codelist-decode.csv
 if (-not (Test-Path $decCsv)) { throw "Decode の対応表がありません: $decCsv" }
 $decByCl = @{}
 $decRows = 0
-# VISITNUM の Decode は docs/trial-design/tv.csv が正本（SDTM の TV ドメインの入力そのもの）。
+# VISITNUM の Decode は docs/metadata/trial-design/tv.csv が正本（SDTM の TV ドメインの入力そのもの）。
 # 対応表へ写すと二重持ちになり、tv.csv を直したときにズレる。ここで読んで対応表へ足す
 # （2026-08-20。CodeList の OID は受領 define.xml 側の CL.VA7745）。
-$tvCsv = Join-Path (Split-Path $PSScriptRoot -Parent) 'docs/trial-design/tv.csv'
+$tvCsv = Join-Path (Split-Path $PSScriptRoot -Parent) 'docs/metadata/trial-design/tv.csv'
 if (Test-Path $tvCsv) {
   $decByCl['CL.VA7745'] = @{}
   foreach ($r in (Import-Csv $tvCsv)) {
@@ -641,10 +636,10 @@ if ($dcSame -gt 0) {
 # CORE は DOMAIN の CodeList が持つ NCI の C コード（Alias）を CT の
 # SDTM Domain Abbreviation（C66734）と照合する（CORE-000929）。受領 define.xml は EC の
 # 項目だけ Alias が抜けており、SDTM 層で作ったドメイン（Trial Design）は CodeList を
-# 持たない。CT の写し docs/ct-domain-ccode.csv から補う（スキル cdisc-define-xml の
+# 持たない。CT の写し docs/metadata/external/ct-domain-ccode.csv から補う（スキル cdisc-define-xml の
 # export-ct-codelist.py が作る）。Decode は ItemGroupDef のラベルに揃える。受領版が
 # 'Demographics' のように CT の preferredTerm から Domain を落とした表記をとっているため。
-$ctCsv = Join-Path (Split-Path $PSScriptRoot -Parent) 'docs\ct-domain-ccode.csv'
+$ctCsv = Join-Path (Split-Path $PSScriptRoot -Parent) 'docs\metadata\external\ct-domain-ccode.csv'
 if (-not (Test-Path $ctCsv)) { throw "ドメインコードの CSV がありません: $ctCsv" }
 $domCcode = @{}
 foreach ($r in Import-Csv $ctCsv) { $domCcode[$r.submission_value] = $r.code }
@@ -718,7 +713,7 @@ Write-Host ("DOMAIN の CodeList : 作成 {0} / Alias 補完 {1}" -f $dcNewCl, $
 
 # ---- ItemRef に Role を付ける ----------------------------------------------------------
 # 受領 define.xml は Role を持たず、CORE が「define-xml の role が IG と一致しない」と
-# 指摘する（CORE-001081）。SDTM IG 3.2 の Role を docs/sdtmig-3-2-variable-roles.csv から
+# 指摘する（CORE-001081）。SDTM IG 3.2 の Role を docs/metadata/external/sdtmig-3-2-variable-roles.csv から
 # 引いて付ける。CSV は scripts/export-sdtmig-roles.py が CDISC CORE のキャッシュ（元は
 # CDISC Library）から作る。IG に無い変数（SDTM の標準変数でないもの）には付けない。
 # ItemDef は途中で足しているので、この時点で作り直す
@@ -744,7 +739,7 @@ if ($roleMiss.Count -gt 0) {
 
 # 作成日時と由来を更新
 $x.ODM.SetAttribute('CreationDateTime', (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))
-$x.ODM.SetAttribute('SourceSystem', "${trialId}_CSVtoSDTM.sas")
+$x.ODM.SetAttribute('SourceSystem', '<試験ID>_CSVtoSDTM.sas')
 
 if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir | Out-Null }
 $outXml = Join-Path $outDir 'define.xml'

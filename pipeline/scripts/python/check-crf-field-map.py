@@ -1,6 +1,6 @@
 # check-crf-field-map.py
 #
-# docs/crf-field-map.csv・docs/crf-option-map.csv（Ptosh の eCRF 定義から生成）の整合を
+# docs/metadata/crf-field-map.csv・docs/metadata/crf-option-map.csv（Ptosh の eCRF 定義から生成）の整合を
 # 確かめる。生成物なので手で直さない。ここで出る指摘は Ptosh の定義か variable-map を直す。
 #
 #   - (sheet_slug, field_name) が一意か
@@ -20,7 +20,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def load(name):
-    with open(os.path.join(REPO, 'docs', name), encoding='utf-8-sig', newline='') as f:
+    with open(os.path.join(REPO, 'docs', 'metadata', name),
+              encoding='utf-8-sig', newline='') as f:
         return list(csv.DictReader(f))
 
 

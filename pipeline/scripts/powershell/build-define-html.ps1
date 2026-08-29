@@ -9,6 +9,8 @@
 param([ValidateSet('all', 'ads', 'sdtm')] [string]$Layer = 'all')
 
 $ErrorActionPreference = 'Stop'
+# 試験フォルダの探索は sas-common.ps1 の Get-TrialRoot が持つ（docs/metadata/trial.json の
+# box_path を読む）。ここで組み立てると、Box の位置や試験フォルダ名を2箇所に書くことになる。
 . (Join-Path $PSScriptRoot 'sas-common.ps1')
 $base = Join-Path (Get-TrialRoot) 'input'
 

@@ -1,22 +1,21 @@
 # init-variable-map.py
 #
-# docs/variable-map.csv の初回版を作る。
-#   SDTM 層 : Box input/sdtm/sdtm_labels.csv（変数とラベル）と define.xml（Origin）から機械的に起こす
-#   ADaM 層 : Box input/ads/json/*.json（Dataset-JSON の columns）から変数とラベルを起こす
+# docs/metadata/variable-map.csv の初回版を作る。
+#   SDTM 層 : Box datasets/sas/sdtm/sdtm_labels.csv（変数とラベル）と define.xml（Origin）から機械的に起こす
+#   ADaM 層 : Box datasets/sas/adam/json/*.json（Dataset-JSON の columns）から変数とラベルを起こす
 #   ARD 層  : ard_cards.csv の列（R の {cards} と同じ構成）
 #
 # predecessor は SDTMtoADaM.sas の導出を読んで判断するものなので、ここでは
 # SDTM と同名で転記しているものだけを埋め、残りは空にする。以後 CSV を手で維持する。
-# 上書きを避けるため、既存の docs/variable-map.csv があると何もせず終わる。
+# 上書きを避けるため、既存の docs/metadata/variable-map.csv があると何もせず終わる。
 import sys, os, glob, json, csv
 import xml.etree.ElementTree as ET
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import boxpath
 sys.stdout.reconfigure(encoding='utf-8')
 
-BOX = boxpath.trial_dir()
+BOX = os.path.join(os.environ.get('AKIKO_BOX_ROOT', os.path.join(os.environ['USERPROFILE'], 'Box')),
+                   r'Stat\Trials\JALSG\<試験ID>')
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT = os.path.join(REPO, 'docs', 'variable-map.csv')
+OUT = os.path.join(REPO, 'docs', 'metadata', 'variable-map.csv')
 if os.path.exists(OUT):
     print('既に', OUT, 'があるので何もしない（手で維持する正本を上書きしないため）')
     sys.exit(0)
@@ -26,7 +25,7 @@ COLS = ['layer', 'dataset', 'variable', 'label_en', 'origin', 'predecessor',
 
 # --- SDTM ---
 ns = {'o': 'http://www.cdisc.org/ns/odm/v1.3', 'd': 'http://www.cdisc.org/ns/def/v2.0'}
-root = ET.parse(os.path.join(BOX, r'input\sdtm\define.xml')).getroot()
+root = ET.parse(os.path.join(BOX, r'datasets\sas\sdtm\define.xml')).getroot()
 origin = {}
 for it in root.findall('.//o:ItemDef', ns):
     o = it.find('d:Origin', ns)
@@ -34,7 +33,7 @@ for it in root.findall('.//o:ItemDef', ns):
         origin[it.get('OID')] = o.get('Type')
 
 rows = []
-with open(os.path.join(BOX, r'input\sdtm\sdtm_labels.csv'), encoding='utf-8-sig', newline='') as f:
+with open(os.path.join(BOX, r'datasets\sas\sdtm\sdtm_labels.csv'), encoding='utf-8-sig', newline='') as f:
     for r in csv.DictReader(f):
         rows.append({
             'layer': 'sdtm', 'dataset': r['dataset'].upper(), 'variable': r['variable'],
@@ -49,7 +48,7 @@ n_sdtm = len(rows)
 FROM_DM = {'STUDYID': 'DM.STUDYID', 'USUBJID': 'DM.USUBJID', 'SUBJID': 'DM.SUBJID',
            'SITEID': 'DM.SITEID', 'AGE': 'DM.AGE', 'AGEU': 'DM.AGEU',
            'SEX': 'DM.SEX', 'RACE': 'DM.RACE', 'ARM': 'DM.ARM', 'ACTARM': 'DM.ACTARM'}
-for f in sorted(glob.glob(os.path.join(BOX, r'input\ads\json\*.json'))):
+for f in sorted(glob.glob(os.path.join(BOX, r'datasets\sas\adam\json\*.json'))):
     ds = os.path.basename(f).replace('.json', '').upper()
     d = json.load(open(f, encoding='utf-8'))
     for c in d['columns']:
