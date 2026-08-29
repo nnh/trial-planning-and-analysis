@@ -383,16 +383,11 @@ comment      : 図表ごとにプログラムを分けず、手法（本ファ�
             analset=&_bgaset, subset=&_bgsub, group1=, group1l=)
 %mend bgfl;
 
-/* 3つの背景表で共通の行項目（SAP 5.2.1・5.2.2・5.2.4） */
-%macro bg_common;
-  %bgc(AGE)      %bgf(AGEGR1)   %bgf(SEX)      %bgf(PSC)
-  %bgc(WBCBL)    %bgf(WBCGR1)   %bgc(HGBBL)    %bgc(PLTBL)
-  %bgc(LDHBL)    %bgc(CRPBL)    %bgc(FDPBL)
-  %bgc(NUCCEBL)  %bgf(CELLBL)   %bgc(MYBLBL)   %bgc(BLSTBL)
-  %bgf(CD20BL)   %bgf(CD13BL)   %bgf(CD33BL)   %bgf(CD34BL)
-  %bgf(KARYO)    %bgf(ADDER22)  %bgf(ADMNS7)   %bgf(ADPLS8)   %bgf(ADDEL9P)
-  %bgf(SUBTYPE)  %bgc(MJCPBL)   %bgc(MNCPBL)
-  %bgf(CNSGR)    %bgf(EXTRAMED)
-  %bgc(FISHMON)  %bgc(FISHSEG)
-  %bgf(CMPHTNFL) %bgf(CMPDMFL)  %bgf(CMPDICFL) %bgf(CMPINFFL)
-%mend bg_common;
+/* 背景表の行項目の並びは試験ごとに違うので、ここには置かない。
+   試験リポジトリの <試験ID>_ARD.sas か、そこから %include する場所で
+   %bgc・%bgf・%bgfl を並べてマクロに括る。書き方の見本は
+   examples/background-table.sas。
+
+   ここが持つのは部品（%bg_init・%bgc・%bgf・%bgfl）までである。
+   並びを汎用層へ置くと、次の試験で枠組みを使う人が、どこを書き換えて
+   よいのか分からなくなる（2026-08-22 の独立レビューの指摘）。 */

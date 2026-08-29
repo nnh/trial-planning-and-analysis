@@ -386,8 +386,8 @@ if BOX:
                                 if k not in NOTKEY and not k.endswith('DTC')])
     scan_data(os.path.join(BOX, 'datasets', 'sas', 'adam', 'json'),
               lambda ds, cols: ['PARAMCD'] if 'PARAMCD' in cols else [])
-    # ADaM の PARAMCD と --SPID の実値。CRF 項目が持つ値レベルの条件（LBTESTCD='MJBCRABL'）を
-    # ADaM の行位置（PARAMCD='MJBCRABL'）へ言い換えるのに使う。対応表は持たず実値の一致で決める。
+    # ADaM の PARAMCD と --SPID の実値。CRF 項目が持つ値レベルの条件（LBTESTCD='<検査項目>'）を
+    # ADaM の行位置（PARAMCD='<検査項目>'）へ言い換えるのに使う。対応表は持たず実値の一致で決める。
     for ds, gg in dsgrp.items():
         if not ds.startswith('AD'):
             continue

@@ -889,7 +889,9 @@ proc format cntlin=_labfmt; run;
   判定不能に数えるが、一覧では実際に何が無いかが見えるようにする）。
 ========================================================================================*/
 
-%macro tab_mrlist(lblid=);
+/* subtypemap … 症例のサブタイプごとに見る測定項目が違う試験で、その対応を渡す。
+                 `<SUBTYPE の値>:<PARAMCD>` を `|` で並べる。空なら絞り込まない。 */
+%macro tab_mrlist(lblid=, subtypemap=);
   %local i ntp nobs _cols _w1 _w2 _wt;
   %_tdmr_load
   /* RTF の列幅は cellwidth で決める。A4 縦の本文幅 11,185 twips（paperw 11905 から
@@ -930,8 +932,24 @@ proc format cntlin=_labfmt; run;
       and (strip(t.rsavisit) = ' ' or strip(r.AVISIT) = strip(t.rsavisit));
   quit;
 
-  /* 2行目：コピー数からの判定（MRCAT）。source に LB を含む時点が該当する。症例の
-     サブタイプに対応する測定項目だけを見る（major は MJBCRABL、minor は MNBCRABL）*/
+  /* 2行目：測定値からの判定（MRCAT）。source に LB を含む時点が該当する。
+     症例のサブタイプごとに見る測定項目が違う試験では、subtypemap で対応を渡す。
+     書き方は `<SUBTYPE の値>:<PARAMCD>` を `|` で並べる（例 major:MJBCRABL|minor:MNBCRABL）。
+     渡さなければ絞り込まず、該当時点の MRCAT をそのまま採る（サブタイプの区別が無い試験）。 */
+  %local _smi _sm _smk _smv _smwh;
+  %let _smwh = ;
+  %if %length(&subtypemap) %then %do;
+    %let _smi = 1;
+    %do %while (%length(%scan(&subtypemap, &_smi, |)));
+      %let _sm  = %scan(&subtypemap, &_smi, |);
+      %let _smk = %scan(&_sm, 1, :);
+      %let _smv = %scan(&_sm, 2, :);
+      %if &_smi = 1 %then %let _smwh = (s.SUBTYPE = "&_smk" and l.PARAMCD = "&_smv");
+      %else %let _smwh = &_smwh or (s.SUBTYPE = "&_smk" and l.PARAMCD = "&_smv");
+      %let _smi = %eval(&_smi + 1);
+    %end;
+    %let _smwh = and (&_smwh);
+  %end;
   proc sql;
     create table _mrlb as
     select t.order as _co, s.SUBJID, l.MRCAT as _v length=40
@@ -939,8 +957,7 @@ proc format cntlin=_labfmt; run;
          inner join ads.adlb as l on strip(l.LBSPID) = strip(t.spid)
          inner join _mrsub as s   on s.SUBJID = l.SUBJID
     where index(strip(t.source), 'LB') > 0 and l.MRCAT ne ' '
-      and ((s.SUBTYPE = 'major' and l.PARAMCD = 'MJBCRABL')
-        or (s.SUBTYPE = 'minor' and l.PARAMCD = 'MNBCRABL'));
+      &_smwh;
   quit;
 
   data _mrv;

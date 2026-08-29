@@ -11,6 +11,7 @@ Ptosh を入力とする臨床試験解析の枠組み。NHO・Ptosh の利用�
 - [pipeline/](pipeline/README.md) — 解析の流れと層の定義、フローチャート、CDISC 適合性検証・ARS の調査
 - [skills/](skills/README.md) — 実行できるスキル（Claude Code の Skill 形式）
 - [templates/](templates/README.md) — 雛形の CSV・JSON
+- [examples/](examples/README.md) — 部品をどう並べるかの見本。読んで書き換えるためのもので、実行しない
 - [findings/](findings/README.md) — 工程ごとの欠陥事例の蓄積
 - [trials/](trials/README.md) — 試験を1本通すごとに残す通過記録
 
