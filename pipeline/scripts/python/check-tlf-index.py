@@ -24,7 +24,9 @@ IDX = os.path.join(REPO, 'docs', 'metadata', 'tlf-index.csv')
 # 表示型の実装は汎用（tlf_ops.sas）と試験固有（tlf_ops_trial.sas）に分かれる。
 # 片方だけを見ると、切り出した表示型が「SAS 側に無い」と誤って出る
 SAS = sorted(glob.glob(os.path.join(REPO, 'program', 'sas', 'macro', 'tlf_ops*.sas')))
-RSRC = os.path.join(REPO, 'program', 'r', boxpath.trial_id() + '_TLF.R')
+# 表示型の実装は汎用（tlf_ops.R）と試験固有（tlf_ops_trial.R）に分かれる。
+# SAS 側と同じで、片方だけを見ると切り出した表示型が「無い」と誤って出る
+RSRC = sorted(glob.glob(os.path.join(REPO, 'program', 'r', 'tlf_ops*.R')))
 
 # 列の並びは docs/metadata/tlf-index.csv が正本。SAS の %tlf_read（LENGTH 文と INPUT 文と
 # 駆動の array）と R の read_csv が同じ並びを読むので、列を足したらこの4箇所を揃える。
@@ -76,8 +78,10 @@ sas_disp = set()
 for _p in SAS:
     sas_disp |= set(re.findall(r'^%macro\s+((?:tab|fig)_[a-z0-9_]+)\s*\(',
                                open(_p, encoding='utf-8').read(), re.M))
-r_disp = set(re.findall(r'^d_((?:tab|fig)_[a-z0-9_]+)\s*<-\s*function',
-                        open(RSRC, encoding='utf-8').read(), re.M))
+r_disp = set()
+for _p in RSRC:
+    r_disp |= set(re.findall(r'^d_((?:tab|fig)_[a-z0-9_]+)\s*<-\s*function',
+                             open(_p, encoding='utf-8').read(), re.M))
 
 # 表題（label-catalog の kind=title）
 titles = set()

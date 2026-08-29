@@ -317,8 +317,12 @@ proc format cntlin=_labfmt; run;
   %end;
 %mend _cellsinit;
 
-/* ds= 表示に使ったデータセット、vars= 表示した列（並び順）、lblid=・display= は宣言のもの */
-%macro _tlfcells(ds, lblid, display, vars);
+/* ds= 表示に使ったデータセット、vars= 表示した列（並び順）、lblid=・display= は宣言のもの。
+   labels= は列見出しの表示名（| 区切り。vars と同じ数・同じ順）。渡すと台帳の col_label に
+   変数名ではなくこちらを記録する。列の数が宣言で変わる表示型では、変数名が位置の番号に
+   なってしまい（G1・G2…）、読み手が意味を取り違える。台帳は人が読むものなので、
+   何の列かが分かる文字列を残す（2026-08-29） */
+%macro _tlfcells(ds, lblid, display, vars, labels=);
   %if &tlfcells = 1 %then %do;
     /* 同じ表番号を複数回呼ぶ表示（%tab_ae73_by_course の18表）があるので、row_seq は
        表番号ごとの通し番号にする。呼び出しごとに 1 から振ると台帳のキー
@@ -341,7 +345,14 @@ proc format cntlin=_labfmt; run;
       _crowk = vvaluex("%scan(&vars, 1)");
       %do i = 1 %to &n;
         %let v = %scan(&vars, &i);
-        col_seq = &i; _ccoll = "&v"; _cval = strip(vvaluex("&v")); output;
+        col_seq = &i;
+        %if %length(%superq(labels)) %then %do;
+          _ccoll = "%qscan(%superq(labels), &i, |)";
+        %end;
+        %else %do;
+          _ccoll = "&v";
+        %end;
+        _cval = strip(vvaluex("&v")); output;
       %end;
       keep _clblid _cdisp row_seq _crowk col_seq _ccoll _cval;
       rename _clblid=lblid _cdisp=display _crowk=row_key _ccoll=col_label _cval=value;
@@ -1273,7 +1284,12 @@ proc format cntlin=_labfmt; run;
   title2 justify=left "%lbl(su, &lblid)";
     %let _gcol = ;
   %do _gi = 1 %to &_gn; %let _gcol = &_gcol G&_gi; %end;
-  %_tlfcells(_ag, &lblid, tab_aegr, %str(AETERM DEN &_gcol))
+  /* 台帳には列の意味を残す。グレードの区切りは宣言で変わるので、変数名（G1・G2…）を
+     書くと位置の番号になり、読み手が Grade 3 と取り違える */
+  %local _glab;
+  %let _glab = %lblfx(ae)|%lblfx(denom);
+  %do _gi = 1 %to &_gn; %let _glab = &_glab|%scan(&_glv, &_gi, |); %end;
+  %_tlfcells(_ag, &lblid, tab_aegr, %str(AETERM DEN &_gcol), labels=%superq(_glab))
 
   /* missing は必須。ORDER 変数（PHASE・TKIG）が欠測の行を proc report は既定で落とすため、
      Out-5.4.7.1 と 5.4.7.6 のように TKIG が全行で欠測の表が本文に1行も出ていなかった
