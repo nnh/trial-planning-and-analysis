@@ -17,7 +17,7 @@
 層をまたぐ生成・検査スクリプト本体。試験リポジトリの `program/macro/`・`scripts/` へそのままコピーして使う。
 
 - `scripts/sas/` — 表示型マクロ（`tlf_ops.sas`）・ARD 生成マクロ（`ard_ops.sas`）・受領データ読み込み（`load_rawdata.sas`）・ソースのタイムスタンプ記録（`srcstamp.sas`）・SDTM 変数メタデータの書き出し（`export-sdtm-metadata.sas`）
-- `scripts/python/` — トレーサビリティ索引・仕様書 HTML・PI パッケージの生成と検査、変数マップ・CRF フィールドマップの生成と検査、ARS の ReportingEvent の生成（`build-ars-json.py`）・系統間の突合（`compare-ars-json.py`）・標準のスキーマによる検証（`check-ars-json.py`）、Box パス解決（`boxpath.py`）、xlsx の読み取り（`read_xlsx.py`、回帰確認は `read_xlsx_test.py`）
+- `scripts/python/` — トレーサビリティ索引・仕様書 HTML・PI パッケージの生成と検査、変数マップ・CRF フィールドマップの生成と検査、旧版と実行ログの世代の片付け（`trim-old-versions.py`）、ARS の ReportingEvent の生成（`build-ars-json.py`）・系統間の突合（`compare-ars-json.py`）・標準のスキーマによる検証（`check-ars-json.py`）、Box パス解決（`boxpath.py`）、xlsx の読み取り（`read_xlsx.py`、回帰確認は `read_xlsx_test.py`）
 - `scripts/r/` — R 系の共通基盤。パス解決・Dataset-JSON の読み書き・SDTM 標準ラベルの辞書・ログ・突合の道具（`ap_common.R`）、図表の Excel 出力（`ap_xlsx.R`）、図表の表示型と描画（`tlf_ops.R`。試験にしかない表示型は試験側の `tlf_ops_trial.R`）。接頭辞 `ap_` は試験に依存しない。試験名を関数名に入れると、その R 一式はその試験の外へ出せなくなる
 - `scripts/powershell/` — SAS バッチ実行の共通処理（`sas-common.ps1`）、12段階を一続きで回す実行（`run-all-sas.ps1`）、ADaM の Dataset-JSON 後処理、SDTM の define.xml 更新・Dataset-JSON 生成・適合性検証の一連の実行。ADaM 側の define.xml の生成は [skills/cdisc-define-xml/](../skills/cdisc-define-xml/SKILL.md) が別に持つ（受領 define.xml を更新するのではなく、変数マップと Dataset-JSON から新規生成する別の作り）
 

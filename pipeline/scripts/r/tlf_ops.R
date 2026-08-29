@@ -784,19 +784,7 @@ TLFDIR <- ap_tlf_dir("r", LANG)
 if (dir.exists(TLFDIR))
   unlink(list.files(TLFDIR, pattern = "^[TF]_.*[.]html$", full.names = TRUE))
 ap_mkdir(TLFDIR)
-## 通し読み版は日付を名前に持つので、同じフォルダに溜まると最新がどれか分からなくなる。
-## 直下には最新の1本だけを残し、以前の版は 旧版/ へ退避する（削除ではない）。索引と
-## PI パッケージは直下だけを見るので、退避すると選び方に迷いが生じない
-ap_archive_old <- function(dir, pattern) {
-  old <- list.files(dir, pattern = pattern, full.names = TRUE)
-  if (!length(old)) return(invisible(NULL))
-  arc <- file.path(dir, "旧版")
-  ap_mkdir(arc)
-  ok <- file.rename(old, file.path(arc, basename(old)))
-  ap_note("[%s] 旧版へ退避: %d 件（%s）", LANG, sum(ok), arc)
-  invisible(NULL)
-}
-ap_archive_old(TLFDIR, paste0("^", TRIAL, "_TLF_.*[.](html|rtf|xlsx)$"))
+ap_archive_old(TLFDIR, paste0("^", TRIAL, "_TLF_.*[.](html|rtf|xlsx)$"), LANG)
 cells <- list()
 html_parts <- character(0)
 toc_parts <- character(0)          # 通し読み版の目次（表番号 → ページ内の錨）

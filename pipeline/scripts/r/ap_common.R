@@ -94,6 +94,21 @@ ap_root <- function(quiet = FALSE) {
        "input/rawdata/DM.csv を含むフォルダを指定してください。")
 }
 
+## 日付を名前に持つ生成物の退避。直下には最新の1組だけを置き、以前の版は 旧版/ へ移す。
+## 退避は生成プログラム自身が行う（人が片付ける運用にすると溜まる）。退避であって削除では
+## ないので、過去の版を参照する必要が出ても失われない。世代を絞るのは別の作業で、
+## scripts/trim-old-versions.py が行う（生成と片付けを混ぜない）。
+ap_archive_old <- function(dir, pattern, tag = "") {
+  old <- list.files(dir, pattern = pattern, full.names = TRUE)
+  if (!length(old)) return(invisible(NULL))
+  arc <- file.path(dir, "旧版")
+  ap_mkdir(arc)
+  ok <- file.rename(old, file.path(arc, basename(old)))
+  ap_note("%s旧版へ退避: %d 件（%s）", if (nzchar(tag)) paste0("[", tag, "] ") else "",
+          sum(ok), arc)
+  invisible(NULL)
+}
+
 ## よく使うディレクトリをまとめて返す。存在しない出力先はここでは作らない。
 ap_paths <- function(root = ap_root()) {
   p <- list(
