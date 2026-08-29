@@ -18,6 +18,7 @@
 
 - `scripts/sas/` — 表示型マクロ（`tlf_ops.sas`）・ARD 生成マクロ（`ard_ops.sas`）・受領データ読み込み（`load_rawdata.sas`）・ソースのタイムスタンプ記録（`srcstamp.sas`）・SDTM 変数メタデータの書き出し（`export-sdtm-metadata.sas`）
 - `scripts/python/` — トレーサビリティ索引・仕様書 HTML・PI パッケージの生成と検査、変数マップ・CRF フィールドマップの生成と検査、ARS の ReportingEvent の生成（`build-ars-json.py`）・系統間の突合（`compare-ars-json.py`）・標準のスキーマによる検証（`check-ars-json.py`）、Box パス解決（`boxpath.py`）、xlsx の読み取り（`read_xlsx.py`、回帰確認は `read_xlsx_test.py`）
+- `scripts/r/` — R 系の共通基盤。パス解決・Dataset-JSON の読み書き・SDTM 標準ラベルの辞書・ログ・突合の道具（`ap_common.R`）と、図表の Excel 出力（`ap_xlsx.R`）。接頭辞 `ap_` は試験に依存しない。試験名を関数名に入れると、その R 一式はその試験の外へ出せなくなる
 - `scripts/powershell/` — SAS バッチ実行の共通処理（`sas-common.ps1`）、12段階を一続きで回す実行（`run-all-sas.ps1`）、ADaM の Dataset-JSON 後処理、SDTM の define.xml 更新・Dataset-JSON 生成・適合性検証の一連の実行。ADaM 側の define.xml の生成は [skills/cdisc-define-xml/](../skills/cdisc-define-xml/SKILL.md) が別に持つ（受領 define.xml を更新するのではなく、変数マップと Dataset-JSON から新規生成する別の作り）
 
 Python は標準ライブラリだけで動かす。例外は `check-ars-json.py` の1本だけで、JSON-Schema による検証に `jsonschema` が要る。入っていない環境では合否と区別できる終了コードで「検証できなかった」と返し、黙って通さない。受領資料の xlsx を読むために openpyxl のような外部パッケージを足さない。対象の端末は Windows と macOS にまたがり、企業ネットワークの制約で pip が通らないものがあるため、依存を1つ足すたびに「入っている端末と入っていない端末」が生まれる。xlsx は ZIP と XML なので、読むだけなら標準ライブラリで足りる（`read_xlsx.py`）。図表の xlsx を書き出すのは R 側（`{openxlsx2}`・`{mschart}`）が持つので、Python 側は読み取りに限る。

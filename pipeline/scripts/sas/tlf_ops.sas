@@ -647,11 +647,12 @@ proc format cntlin=_labfmt; run;
   SAP の図表案は評価時点を列に置くが、23列は A4 縦の本文幅（11,185 twips）に入らない
   （n (%) のセルで約22,800 twips 必要）。行と列を入れ替えて1表にする。内容は同じ。
   行の並びと表示名は docs/metadata/mr-timepoint.csv（%_tdmr_load）が持ち、列の並びは levels= で決める。
-  SUBSET='NOSAMEDAY' の解析がある水準は、割合ではなくその件数をカッコに入れる
+  宣言の subset= で渡した部分集合の解析がある水準は、割合ではなくその件数をカッコに入れる。
+  部分集合の名前は試験ごとに違うので、表示型に直書きせず宣言から受ける（2026-08-29）
   （molpd・molr は88例の排他区分ではなくイベントの件数なので割合を出さない）。
 ========================================================================================*/
 
-%macro tab_prop_tp(output_id=, lblid=, levels=);
+%macro tab_prop_tp(output_id=, lblid=, levels=, subset=);
   %local nobs i nlv;
   %_tdmr_load
   %let nlv = %sysfunc(countw(&levels, |));
@@ -703,8 +704,8 @@ proc format cntlin=_labfmt; run;
          inner join _tplv  as c on strip(a.VARLEVEL) = strip(c.VARLEVEL)
          left  join _tpv   as b on strip(a.GROUP1L)  = strip(b.GROUP1L)
                                and strip(a.VARLEVEL) = strip(b.VARLEVEL)
-                               and strip(b.SUBSET)   = 'NOSAMEDAY'
-    where strip(a.SUBSET) ne 'NOSAMEDAY';
+                               and strip(b.SUBSET)   = "&subset"
+    where strip(a.SUBSET) ne "&subset";
   quit;
 
   proc sort data=_tpc; by _ro ROWLBL _co; run;
@@ -1213,8 +1214,13 @@ proc format cntlin=_labfmt; run;
   ARD の VARIABLE が有害事象の項目名を持つので、そこから直接組む。
 ========================================================================================*/
 
-%macro tab_aegr(output_id=, lblid=, filter=);
-  %local nobs;
+%macro tab_aegr(output_id=, lblid=, filter=, levels=);
+  %local nobs _gi _gn _glv _gcol;
+  /* グレードの区切りは宣言の levels= が持つ。空なら CTCAE の4区分を既定にする。
+     区切り方は表示の選択なので表示型に直書きしない（2026-08-29） */
+  %let _glv = &levels;
+  %if %length(&_glv) = 0 %then %let _glv = Grade 1-2|Grade 3|Grade 4|Grade 5;
+  %let _gn  = %sysfunc(countw(%superq(_glv), |));
   /* filter に * を含む宣言（SUBSET=* and GROUP1L=*）は、ARD が持つ TKI区分 × 治療相の
      組合せで表を分ける（SAP 5.4.7.3 の図表案）。組合せの正本を ARD に置いたままにしたい
      ので、宣言を組合せの数だけ並べない。並びは TKI区分 → 治療相。表題は label-catalog の
@@ -1244,10 +1250,10 @@ proc format cntlin=_labfmt; run;
     select GROUP1L as PHASE length=20, SUBSET as TKIG length=20,
            VARIABLE as AETERM length=80,
            max(case when STATNAME='N'                                then STAT end) as DEN,
-           max(case when STATNAME='n' and VARLEVEL='Grade 1-2'       then STAT end) as G12,
-           max(case when STATNAME='n' and VARLEVEL='Grade 3'         then STAT end) as G3,
-           max(case when STATNAME='n' and VARLEVEL='Grade 4'         then STAT end) as G4,
-           max(case when STATNAME='n' and VARLEVEL='Grade 5'         then STAT end) as G5
+           %do _gi = 1 %to &_gn;
+             max(case when STATNAME='n' and VARLEVEL="%scan(&_glv, &_gi, |)"
+                      then STAT end) as G&_gi %if &_gi < &_gn %then ,;
+           %end;
     from ard.ard
     where OUTPUTID = "&output_id" %if %length(&filter) %then and &filter;
     group by GROUP1L, SUBSET, VARIABLE;
@@ -1265,22 +1271,23 @@ proc format cntlin=_labfmt; run;
 
   title1 justify=left "%lbl(ti, &lblid)";
   title2 justify=left "%lbl(su, &lblid)";
-  %_tlfcells(_ag, &lblid, tab_aegr, %str(AETERM DEN G12 G3 G4 G5))
+    %let _gcol = ;
+  %do _gi = 1 %to &_gn; %let _gcol = &_gcol G&_gi; %end;
+  %_tlfcells(_ag, &lblid, tab_aegr, %str(AETERM DEN &_gcol))
 
   /* missing は必須。ORDER 変数（PHASE・TKIG）が欠測の行を proc report は既定で落とすため、
      Out-5.4.7.1 と 5.4.7.6 のように TKIG が全行で欠測の表が本文に1行も出ていなかった
      （表題だけが出る。台帳は表示前のデータセットから貯めるので突合では気づけない。
      2026-08-20 に検出）*/
   proc report data=_ag nowd missing;
-    column PHASE TKIG AETERM DEN G12 G3 G4 G5;
+    column PHASE TKIG AETERM DEN &_gcol;
     define PHASE  / order noprint;
     define TKIG   / order noprint;
     define AETERM / display "%lblfx(ae)" width=48;
     define DEN    / display "%lblfx(denom)"      format=4.0;
-    define G12    / display 'Grade 1-2' format=4.0;
-    define G3     / display 'Grade 3'   format=4.0;
-    define G4     / display 'Grade 4'   format=4.0;
-    define G5     / display 'Grade 5'   format=4.0;
+    %do _gi = 1 %to &_gn;
+      define G&_gi / display "%scan(&_glv, &_gi, |)" format=4.0;
+    %end;
   run;
   title;
   %_tlfclose
@@ -1460,14 +1467,14 @@ proc format cntlin=_labfmt; run;
     infile "&path" dsd dlm=',' truncover firstobs=2 encoding='utf-8' lrecl=32767;
     length seq 8 lblid $20 display $20 analysis_id $40 output_id $40 filter $200
            groups $200 levels $200 item_var $40 item_label $200 vars $200 labels $200
-           paramcd $20 where $100 group $20 blocks $600 subtypemap $200;
+           paramcd $20 where $100 group $20 blocks $600 subtypemap $200 subset $40;
     /* 列を足したら LENGTH と INPUT の両方へ書く。LENGTH にだけ足すと、その列は常に
        空のまま駆動へ渡り、宣言に書いた値が黙って効かない。subtypemap が 2026-08-29 まで
        この状態で、%tab_mrlist がサブタイプの対応を受け取れていなかった（値は
        docs/metadata/tlf-index.csv に入っていた）。列の並びは同 CSV が正本 */
     input seq lblid $ display $ analysis_id $ output_id $ filter $ groups $ levels $
           item_var $ item_label $ vars $ labels $ paramcd $ where $ group $ blocks $
-          subtypemap $;
+          subtypemap $ subset $;
   run;
   proc sort data=&out; by seq; run;
 %mend tlf_read;
@@ -1485,7 +1492,7 @@ proc format cntlin=_labfmt; run;
       length _a $8000;
       _a = 'lblid=' || strip(lblid);
       array _v{*} analysis_id output_id filter groups levels item_var item_label
-                  vars labels paramcd where group blocks subtypemap;
+                  vars labels paramcd where group blocks subtypemap subset;
       do _j = 1 to dim(_v);
         if not missing(_v[_j]) then
           _a = strip(_a) || ',' || strip(vname(_v[_j])) || '=' || strip(_v[_j]);

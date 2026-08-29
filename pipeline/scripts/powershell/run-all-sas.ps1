@@ -25,21 +25,20 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'sas-common.ps1')
 
-# 試験 ID は docs/metadata/trial.json だけが持つ。プログラム名の組み立てと、SAS・R が
-# 見る環境変数の名前に使うので、-Root の処理より前に取る。
+# 試験 ID は docs/metadata/trial.json だけが持つ。プログラム名の組み立てに使う。
 $trialId = (Get-TrialConfig).trial_id
 
 # -Root を渡すと、入力・出力・ログの置き場をまとめてその下へ振り替える。本番の試験
 # フォルダを読み書きせずに検証するための口で、autoexec.sas・sas-common.ps1・R 側の
-# 試験フォルダ解決の3つが同じ場所を指すように環境変数を2つ立てる。SAS は Start-Process
+# 試験フォルダ解決の3つが同じ場所を指すように環境変数を1つ立てる。SAS は Start-Process
 # の子プロセスとして環境変数を継承するので、これで autoexec に届く。
+# 2026-08-29 まで試験ごとの名前（<試験ID>_ROOT）も併せて立てていた。名前の組み立て方が
+# 枠組みと試験側で食い違っており、2試験目で黙って空振りする形だったのでやめた。
+# 環境変数の名前は試験に依存させない。試験IDから名前を作ると、作り方を共有する必要が
+# 生じ、その共有が破れても誰も気づかない（見つかったときの症状は「-Root が効かない」）。
 if ($Root) {
   if (-not (Test-Path -LiteralPath $Root)) { throw "-Root が指す場所がありません: $Root" }
   $env:AKIKO_TRIAL_ROOT = (Resolve-Path -LiteralPath $Root).Path
-  # autoexec.sas と R 側が見る環境変数は試験ごとに名前が違う（<試験ID>_ROOT）。
-  # $env: は変数名を式で書けないので、Env プロバイダを Set-Item で直に叩く。
-  $rootVar = ($trialId -replace '[^A-Za-z0-9]', '_').ToUpper() + '_ROOT'
-  Set-Item -Path "Env:$rootVar" -Value $env:AKIKO_TRIAL_ROOT
   Write-Host "出力先の差し替え（検証用）: $env:AKIKO_TRIAL_ROOT"
 }
 

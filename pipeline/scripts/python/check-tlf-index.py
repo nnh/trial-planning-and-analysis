@@ -31,7 +31,7 @@ RSRC = os.path.join(REPO, 'program', 'r', boxpath.trial_id() + '_TLF.R')
 # 1箇所でも漏れると、その列は宣言に書いても黙って効かない
 COLS = ['seq', 'lblid', 'display', 'analysis_id', 'output_id', 'filter', 'groups',
         'levels', 'item_var', 'item_label', 'vars', 'labels', 'paramcd', 'where',
-        'group', 'blocks', 'subtypemap']
+        'group', 'blocks', 'subtypemap', 'subset']
 
 # 表示型ごとに埋まっていなければならない列
 REQ = {'tab_km': ['analysis_id'], 'tab_prop': ['analysis_id'], 'tab_cif': ['analysis_id'],
