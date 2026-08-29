@@ -105,7 +105,6 @@ proc format cntlin=_labfmt; run;
 %sysfunc(strip(%sysfunc(putc(&key, $lblfx.))))
 %mend lblfx;
 
-
 /*========================================================================================
   1.1 生存時間解析の表（時点別の生存割合と95%信頼区間）
 ========================================================================================*/
@@ -369,8 +368,6 @@ proc format cntlin=_labfmt; run;
     %put NOTE: [TLF] セル台帳を書いた: &path;
   %end;
 %mend _cellswrite;
-
-
 
 /*========================================================================================
   1.2 割合の表（頻度・割合・二項95%信頼区間）
@@ -755,8 +752,6 @@ proc format cntlin=_labfmt; run;
   %_tlfclose
 %mend tab_prop_tp;
 
-
-
 /*========================================================================================
   1.3 背景表（連続量とカテゴリを1つの表に並べる。行順は ANALYSID の連番）
 ========================================================================================*/
@@ -975,173 +970,6 @@ proc format cntlin=_labfmt; run;
   title;
   %_tlfclose
 %mend tab_list;
-
-/*========================================================================================
-  1.5.1 分子遺伝学的効果の症例別一覧（SAP 5.4.3.2）
-
-  症例あたり2行。1行目は CRF の判定欄（ads.adrs。判定欄があるシートのみ）、2行目は
-  コピー数から導出した判定（ads.adlb の MRCAT。提出された全シート）。列は 表 5.4.3.1 と
-  同じ23評価時点で、並びと列見出し（glabel）は docs/metadata/mr-timepoint.csv（%_tdmr_load）が持つ。
-  結果値の集計ではなく症例単位の一覧なので ARD からは作れず、ADaM から直接組む
-  （%tab_list と同じ作り方）。
-  判定欄の値は紙幅の都合で略号にする（MOLECULAR CR → CR など。対応は脚注）。
-  測定も判定も無い時点は空欄にする。判定不能とは書かない（表 5.4.3.1 の集計は未測定を
-  判定不能に数えるが、一覧では実際に何が無いかが見えるようにする）。
-========================================================================================*/
-
-/* subtypemap … 症例のサブタイプごとに見る測定項目が違う試験で、その対応を渡す。
-                 `<SUBTYPE の値>:<PARAMCD>` を `|` で並べる。空なら絞り込まない。 */
-%macro tab_mrlist(lblid=, subtypemap=);
-  %local i ntp nobs _cols _w1 _w2 _wt;
-  %_tdmr_load
-  /* RTF の列幅は cellwidth で決める。A4 縦の本文幅 11,185 twips（paperw 11905 から
-     左右の余白 各360 を引いた幅）に収める。実際に出る幅は 760 + 910 + 23x410 =
-     11,100 twips。単位を付けないと ODS RTF が別の単位で読んで桁違いに広い表を作り、
-     1つの表が列ごとの表に分割される（2026-08-21）*/
-  %let _w1 = 38pt;   /* 症例 */
-  %let _w2 = 45pt;   /* 種別 */
-  %let _wt = 20pt;   /* 評価時点（23列を等幅）*/
-
-  /* 評価時点の並びと列見出し。正本は docs/metadata/mr-timepoint.csv */
-  proc sort data=work._tdmr out=_mrtp; by order; run;
-  proc sql noprint; select count(*) into :ntp trimmed from _mrtp; quit;
-  %if &ntp = 0 %then %do;
-    %put WARNING: [TLF] work._tdmr に評価時点がない。一覧を作らない;
-    %return;
-  %end;
-  data _null_;
-    set _mrtp;
-    call symputx(cats('_mg', _n_), strip(glabel), 'G');
-  run;
-
-  /* 対象は FAS。症例の識別子は SUBJID（4桁）にする。USUBJID は試験名が表題と重なって
-     冗長で、紙幅も食う。サブタイプは ADSL のものを正とし、ADLB の測定項目に対応づける */
-  proc sort data=ads.adsl(where=(FASFL='Y') keep=SUBJID SUBTYPE FASFL) out=_mrsub;
-    by SUBJID;
-  run;
-
-  /* 1行目：CRF の判定欄。rsparamcd を持つ時点だけが該当する。MOLRESP の3時点は AVISIT が
-     rsavisit と一致する行、MOLPD・MOLR の2時点は AVISIT を見ない */
-  proc sql;
-    create table _mrrs as
-    select t.order as _co, s.SUBJID, r.AVALC as _v length=40
-    from _mrtp as t
-         inner join ads.adrs as r on strip(r.PARAMCD) = strip(t.rsparamcd)
-         inner join _mrsub as s   on s.SUBJID = r.SUBJID
-    where strip(t.rsparamcd) ne ' ' and r.AVALC ne ' '
-      and (strip(t.rsavisit) = ' ' or strip(r.AVISIT) = strip(t.rsavisit));
-  quit;
-
-  /* 2行目：測定値からの判定（MRCAT）。source に LB を含む時点が該当する。
-     症例のサブタイプごとに見る測定項目が違う試験では、subtypemap で対応を渡す。
-     書き方は `<SUBTYPE の値>:<PARAMCD>` を `|` で並べる（例 major:MJBCRABL|minor:MNBCRABL）。
-     渡さなければ絞り込まず、該当時点の MRCAT をそのまま採る（サブタイプの区別が無い試験）。 */
-  %local _smi _sm _smk _smv _smwh;
-  %let _smwh = ;
-  %if %length(&subtypemap) %then %do;
-    %let _smi = 1;
-    %do %while (%length(%scan(&subtypemap, &_smi, |)));
-      %let _sm  = %scan(&subtypemap, &_smi, |);
-      %let _smk = %scan(&_sm, 1, :);
-      %let _smv = %scan(&_sm, 2, :);
-      %if &_smi = 1 %then %let _smwh = (s.SUBTYPE = "&_smk" and l.PARAMCD = "&_smv");
-      %else %let _smwh = &_smwh or (s.SUBTYPE = "&_smk" and l.PARAMCD = "&_smv");
-      %let _smi = %eval(&_smi + 1);
-    %end;
-    %let _smwh = and (&_smwh);
-  %end;
-  proc sql;
-    create table _mrlb as
-    select t.order as _co, s.SUBJID, l.MRCAT as _v length=40
-    from _mrtp as t
-         inner join ads.adlb as l on strip(l.LBSPID) = strip(t.spid)
-         inner join _mrsub as s   on s.SUBJID = l.SUBJID
-    where index(strip(t.source), 'LB') > 0 and l.MRCAT ne ' '
-      &_smwh;
-  quit;
-
-  data _mrv;
-    set _mrrs(in=_a) _mrlb;
-    length VALC $8;
-    _ki = ifn(_a, 1, 2);
-    /* 判定欄の値は紙幅の都合で略号にする。ND・NQ・DT・NE は記録のまま */
-    select (strip(_v));
-      when ('MOLECULAR CR') VALC = 'CR';
-      when ('MOLECULAR PD') VALC = 'PD';
-      when ('MOLECULAR R')  VALC = 'R';
-      when ('MOLECULAR TF') VALC = 'TF';
-      otherwise VALC = strip(_v);
-    end;
-    keep SUBJID _ki _co VALC;
-  run;
-  proc sort data=_mrv nodupkey; by SUBJID _ki _co; run;
-
-  /* 症例 × 2行 × 23時点の枠を先に作る。proc transpose は値のある _co しか列にしないため、
-     枠が無いと測定が1件も無い時点の列が落ちて列数が変わる */
-  data _mrgrid;
-    set _mrsub;
-    do _ki = 1 to 2;
-      do _co = 1 to &ntp;
-        output;
-      end;
-    end;
-    keep SUBJID _ki _co;
-  run;
-  proc sql;
-    create table _mrcell as
-    select g.SUBJID, g._ki, g._co, coalescec(v.VALC, ' ') as VALC length=8
-    from _mrgrid as g left join _mrv as v
-      on g.SUBJID = v.SUBJID and g._ki = v._ki and g._co = v._co;
-  quit;
-  proc sort data=_mrcell; by SUBJID _ki _co; run;
-
-  proc transpose data=_mrcell out=_mrt(drop=_NAME_) prefix=T;
-    by SUBJID _ki;
-    id _co;
-    var VALC;
-  run;
-
-  data _mrl;
-    set _mrt;
-    length KIND $40;
-    KIND = ifc(_ki = 1, "%lblfx(mr_crf)", "%lblfx(mr_copy)");
-  run;
-  proc sort data=_mrl; by SUBJID _ki; run;
-
-  proc sql noprint; select count(*) into :nobs trimmed from _mrl; quit;
-  %if &nobs = 0 %then %do;
-    %put WARNING: [TLF] &lblid に対象例がない。一覧を作らない;
-    %return;
-  %end;
-
-  %let _cols = SUBJID KIND;
-  %do i = 1 %to &ntp; %let _cols = &_cols T&i; %end;
-
-  %_tlfopen(&lblid)
-
-  title1 justify=left "%lbl(ti, &lblid)";
-  title2 justify=left "%lbl(su, &lblid)";
-  footnote1 justify=left "%lbl(fo, &lblid)";
-  %_tlfcells(_mrl, &lblid, tab_mrlist, %str(&_cols))
-
-  /* width= は LISTING だけに効く。合計を 9 + 11 + 23x6 = 158 桁にする。LINESIZE を
-     超えると proc report が表を列で分割し、その分割が ODS RTF にもそのまま出る
-     （%fig_km の ods graphics が LISTING の幅を 171 桁まで下げている。2026-08-21）*/
-  proc report data=_mrl nowd;
-    column SUBJID _ki KIND %do i = 1 %to &ntp; T&i %end;;
-    /* order 変数は欠測の行を既定で落とすので missing を付ける */
-    define SUBJID / order order=internal missing "%lblfx(subject)" width=7
-                    style(column)=[cellwidth=&_w1];
-    define _ki    / order noprint missing;
-    define KIND   / display "%lblfx(mr_kind)" width=9
-                    style(column)=[cellwidth=&_w2];
-    %do i = 1 %to &ntp;
-      define T&i / display "&&_mg&i" width=4 style(column)=[cellwidth=&_wt];
-    %end;
-  run;
-  title; footnote;
-  %_tlfclose
-%mend tab_mrlist;
 
 /*========================================================================================
   1.6 累積発生率の表（競合リスク。SAP 4.4.10）
@@ -1380,7 +1208,6 @@ proc format cntlin=_labfmt; run;
   %_tlfclose
 %mend tab_crs;
 
-
 /*========================================================================================
   1.9 有害事象の最悪グレード表（SAP 5.4.7.1・5.4.7.3・5.4.7.6）
   ARD の VARIABLE が有害事象の項目名を持つので、そこから直接組む。
@@ -1459,7 +1286,6 @@ proc format cntlin=_labfmt; run;
   %_tlfclose
 %mend tab_aegr;
 
-
 /*========================================================================================
   第2章 前処理
 
@@ -1515,7 +1341,6 @@ proc format cntlin=_labfmt; run;
   quit;
   proc sort data=_abllist2 out=_abllist; by CTX SUBJID; run;
 %mend _list_abl;
-
 
 /*========================================================================================
   第3章 宣言の駆動
@@ -1624,7 +1449,6 @@ proc format cntlin=_labfmt; run;
   title; footnote;
   %_tlfclose
 %mend tab_ref;
-
 
 /* 宣言を読む。proc import は空欄の多い列を数値と判定して宣言を黙って落とすので使わない。
    列の並びは CSV のヘッダで固定し（並びの検査は scripts/check-tlf-index.py が持つ）、

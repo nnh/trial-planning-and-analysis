@@ -14,14 +14,16 @@
 # 2026-08-21 まではこの検査が TLF.sas の描画宣言と CSV を照合していた。SAS 側を CSV 駆動へ
 # 変えて宣言の実体が1つになったので、照合はやめた。SAS のソースを読まないため、
 # セッションの符号化を変えてもこの検査は壊れない。
-import sys, os, csv, re, collections
+import sys, os, csv, re, glob, collections
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import boxpath
 sys.stdout.reconfigure(encoding='utf-8')
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IDX = os.path.join(REPO, 'docs', 'metadata', 'tlf-index.csv')
-SAS = os.path.join(REPO, 'program', 'sas', 'macro', 'tlf_ops.sas')
+# 表示型の実装は汎用（tlf_ops.sas）と試験固有（tlf_ops_trial.sas）に分かれる。
+# 片方だけを見ると、切り出した表示型が「SAS 側に無い」と誤って出る
+SAS = sorted(glob.glob(os.path.join(REPO, 'program', 'sas', 'macro', 'tlf_ops*.sas')))
 RSRC = os.path.join(REPO, 'program', 'r', boxpath.trial_id() + '_TLF.R')
 
 # 列の並びは docs/metadata/tlf-index.csv が正本。SAS の %tlf_read（LENGTH 文と INPUT 文と
@@ -70,8 +72,10 @@ except ValueError:
     err.append('seq に数でない値がある')
 
 # 表示型の実装（SAS のマクロと R の d_ 関数）
-sas_disp = set(re.findall(r'^%macro\s+((?:tab|fig)_[a-z0-9_]+)\s*\(',
-                          open(SAS, encoding='utf-8').read(), re.M))
+sas_disp = set()
+for _p in SAS:
+    sas_disp |= set(re.findall(r'^%macro\s+((?:tab|fig)_[a-z0-9_]+)\s*\(',
+                               open(_p, encoding='utf-8').read(), re.M))
 r_disp = set(re.findall(r'^d_((?:tab|fig)_[a-z0-9_]+)\s*<-\s*function',
                         open(RSRC, encoding='utf-8').read(), re.M))
 
