@@ -557,8 +557,11 @@ def main():
     copy(os.path.join(REPO, 'renv', 'activate.R'),
          os.path.join(pkg, 'reproduce', 'renv', 'activate.R'))
     # 機械が読む定義の正本は docs/metadata/。配布形態では input/spec/ へ平らに写す
-    # （R 側は phall_spec() が両方を探す）
-    for name in ('tlf-index.csv', 'label-catalog.csv', 'variable-map.csv',
+    # （R 側は ap_spec() が両方を探す）
+    # trial.json は R が起動時に読む（試験の識別子と Box の中の置き場）。同梱しないと
+    # 配った先で図表の描画が「trial.json が見つかりません」で止まる（2026-08-29）
+    for name in ('trial.json',
+                 'tlf-index.csv', 'label-catalog.csv', 'variable-map.csv',
                  'crf-field-map.csv', 'crf-option-map.csv',
                  'reference-table-rows.csv', 'reference-values.csv',
                  'mr-timepoint.csv'):

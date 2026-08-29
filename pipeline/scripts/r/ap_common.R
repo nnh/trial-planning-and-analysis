@@ -39,6 +39,8 @@ ap_trial_config <- function() {
   cand <- c(file.path(d, "..", "..", "docs", "metadata", "trial.json"),
             file.path(d, "..", "docs", "metadata", "trial.json"),
             file.path(d, "docs", "metadata", "trial.json"),
+            ## 単独フォルダへ展開した配布形態。R は平置きで、仕様は input/spec/ にある
+            file.path(d, "input", "spec", "trial.json"),
             file.path(d, "..", "..", "input", "spec", "trial.json"),
             file.path(d, "trial.json"))
   for (p in cand) if (file.exists(p)) {
