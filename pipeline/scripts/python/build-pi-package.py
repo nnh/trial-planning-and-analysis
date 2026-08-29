@@ -86,6 +86,49 @@ def copy_tlf(src, dst, pat='*'):
     return n
 
 
+# --- 納品してよい文書の境界 ---------------------------------------------------------
+#
+# R のコメントが指す md を集め、その md が指す md も辿るので、境界を置かないと
+# 芋づる式に内部文書まで入る。2026-08-29 の版には、データセンターへの照会メール案、
+# 独立レビューの実施記録、SAP 本体への修正指示書、日次の作業ログが入っていた。
+#
+# 許可はディレクトリで決める。同梱してよいのは、実装が従う仕様（spec）と規制文書（tmf）の
+# 全部と、records のうちここに名前を挙げたものだけである。records を名前で挙げるのは、
+# 新しい記録を足したときに黙って納品物へ入らないようにするため。既定は「入れない」にする。
+#
+# 挙げてよいのは、結果の値がなぜそうなるかを説明する記録に限る。内部の品質管理・環境の
+# 検証・作業中の指示は、PI が読む前提で書かれていないので入れない。
+DOC_DIRS = ('spec/', 'tmf/')
+DOC_RECORDS = {
+    'records/cmr-derivation-findings-20260819.md',      # CMR 判定の導出
+    'records/sdtm-conformance-findings-20260815.md',    # 適合性検証の結果と仕分け
+    'records/rawdata-value-scan-20260809.md',           # 受領データの実値の走査
+    'records/ecrf-reference-field-issue-20260809.md',   # eCRF の不具合（データの制約）
+    'records/dscat-disposition-event-note.md',          # 観察終了の扱い
+}
+
+
+def doc_allowed(name):
+    """docs からの相対パスが納品してよいものか"""
+    n = name.replace(os.sep, '/').lstrip('./')
+    return n.startswith(DOC_DIRS) or n in DOC_RECORDS
+
+
+def drop_links(text, here):
+    """同梱しない md へのリンクを、素の文字列と断り書きへ落とす。
+
+    リンクのまま残すとパッケージの中で参照先が無くなり、check-pi-package.py が落ちる。
+    参照していた事実は本文に残したいので、消さずに文字列にする。
+    """
+    def repl(m):
+        label, target = m.group(1), m.group(2)
+        rel = os.path.normpath(os.path.join(here, target)).replace(os.sep, '/')
+        if doc_allowed(rel):
+            return m.group(0)
+        return f'{label}（内部の記録のため同梱していない）'
+    return re.sub(r'\[([^\]]*)\]\(([\w.\-/]+\.md)\)', repl, text)
+
+
 def copy_tree(src, dst, pat='*'):
     n = 0
     for p in sorted(glob.glob(os.path.join(src, pat))):
@@ -578,7 +621,7 @@ def main():
     # 構成の正本として `docs/tmf/spec/efs_plan_v0.5.md`・`analysis_plan_v0.2.md` を指しており、
     # 同梱しないとパッケージの中で参照先が無くなる（2026-08-23 に納品対象へ加えると決めた）。
     # 参照の書き方は本文中の `docs/<パス>.md` と md のリンク `](<パス>.md)` の2通りある。
-    n_doc, lost = 0, []
+    n_doc, lost, blocked = 0, [], []
 
     def md_refs(text, here):
         """docs からの相対パスの一覧を返す。
@@ -602,19 +645,29 @@ def main():
         if name in seen:
             continue
         seen.add(name)
+        if not doc_allowed(name):
+            blocked.append(name)
+            continue
         src = os.path.join(REPO, 'docs', name)
         if not os.path.exists(src):
             lost.append(name)
             continue
         dst = os.path.join(pkg, 'reproduce', 'docs', name)
+        body = open(src, encoding='utf-8', errors='replace').read()
         if not os.path.exists(dst):
-            copy(src, dst)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            # 同梱しない md へのリンクは外してから写す。残すとパッケージの中で
+            # 参照先が無くなり、check-pi-package.py が落ちる
+            open(dst, 'w', encoding='utf-8', newline='\n').write(
+                drop_links(body, os.path.dirname(name)))
             n_doc += 1
-        pending += md_refs(open(src, encoding='utf-8', errors='replace').read(),
-                           os.path.dirname(name))
+        pending += md_refs(body, os.path.dirname(name))
     # 同梱しなかった参照は報告するが、これは異常ではない。akiko-office の環境文書
     # （`methods/…`・`sas-environment.md` など）とリポジトリルートの作業記録
     # （`action-items.md`）は納品対象外なので、docs/ に無いのが正しい
+    if blocked:
+        print(f'  納品対象外の文書 {len(blocked)} 件を外した（リンクは本文の文字列へ落とした）: '
+              + '、'.join(sorted(set(blocked))))
     print(f'  reproduce: R {n_r} 本 + 仕様 13 ファイル + docs {n_doc} ファイル'
           + (f'（同梱しなかった参照 {len(set(lost))} 件: {sorted(set(lost))}）' if lost else ''))
 
