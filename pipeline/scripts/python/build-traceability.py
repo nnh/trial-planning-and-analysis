@@ -1,14 +1,14 @@
 # build-traceability.py
 #
-# PI 向けのトレーサビリティ索引 output/traceability.html を1ファイルで作る。
+# PI 向けのトレーサビリティ索引 output/deliver/r/traceability.html を1ファイルで作る。
 # CSS・JS・データをすべて埋め込み、ブラウザだけで開ける状態にする。
 #
 # 索引は「ノード」と「エッジ」でできている。ノードは追跡の対象（CRF の項目・SDTM の変数・
 # ADaM の変数・解析・図表）、エッジは層をまたぐ対応で、それぞれ根拠となる正本が別にある。
 # 画面ではどのノードからでも上流・下流へクリックで移動できる。
 #
-#   CRF 項目 → SDTM 変数    docs/crf-field-map.csv（aCRF の注釈から生成。値レベルの条件つき）
-#   SDTM 変数 → ADaM 変数   docs/variable-map.csv の predecessor
+#   CRF 項目 → SDTM 変数    docs/metadata/crf-field-map.csv（aCRF の注釈から生成。値レベルの条件つき）
+#   SDTM 変数 → ADaM 変数   docs/metadata/variable-map.csv の predecessor
 #   ADaM 変数 → 解析        ARD の由来列（src_data・src_var）。取れない解析は変数名の一致（暫定）
 #   解析 → 図表             ARD の output_id と TLF.sas の呼び出し引数
 #
@@ -16,16 +16,16 @@
 # を足したので、data= が ADaM を直に指す解析はその絞り込みごと確定で結べる（画面には
 # where 句を出す）。data= が作業データセット（_ae73・_bgfas 等）を指す解析は、そこから
 # ADaM へ遡る1段を ARD が持たないため、従来どおり変数名の一致で結び暫定と表示する
-# （docs/label-and-traceability-design.md の段階5）。
+# （docs/spec/label-and-traceability-design.md の段階5）。
 #
 # 入力
-#   docs/variable-map.csv          層をまたいだ変数の対応（手で維持する正本）
-#   docs/crf-field-map.csv         帳票×項目と SDTM の対応（aCRF から生成）
-#   docs/label-catalog.csv         図表の表題・水準・解析項目の表示名
+#   docs/metadata/variable-map.csv          層をまたいだ変数の対応（手で維持する正本）
+#   docs/metadata/crf-field-map.csv         帳票×項目と SDTM の対応（aCRF から生成）
+#   docs/metadata/label-catalog.csv         図表の表題・水準・解析項目の表示名
 #   docs/tmf/aCRF/*-acrf.csv       aCRF の帳票名と URL（帳票の並び順もこれが持つ）
 #   program/<試験ID>_TLF.sas 図表の描画宣言（表番号と解析IDの対応）
-#   Box input/ads/ard_cards.csv    ARD の実データ（結果値まで）
-#   Box input/ads/json/*.json      ADaM の PARAMCD・--SPID の実値（値レベルの条件の引き継ぎ用）
+#   Box datasets/sas/ard/ard_cards.csv    ARD の実データ（結果値まで）
+#   Box datasets/sas/adam/json/*.json      ADaM の PARAMCD・--SPID の実値（値レベルの条件の引き継ぎ用）
 #   Box input/rawdata/*.csv        --SPID の実値（ドメインごと）
 #
 # 外へ出るリンク（aCRF・図表の HTML）は相対パスだけで作る。索引の隣にある置き場所を実際に
@@ -57,8 +57,8 @@ ap.add_argument('--tlf-base',
 args = ap.parse_args()
 
 BOX = None if args.no_box else boxpath.trial_dir(required=False)
-OUT = args.out or (os.path.join(BOX, 'output', 'traceability.html') if BOX else
-                   os.path.join(REPO, 'traceability.html'))
+OUT = args.out or (os.path.join(BOX, 'output', 'deliver', 'r', 'traceability.html') if BOX
+                   else os.path.join(REPO, 'traceability.html'))
 OUTDIR = os.path.dirname(os.path.abspath(OUT))
 
 # --- aCRF と図表の置き場所 -------------------------------------------------------------
@@ -66,9 +66,14 @@ OUTDIR = os.path.dirname(os.path.abspath(OUT))
 # 渡しても、Box のどこへ置いても切れないようにするため。絶対 URL（S3）は使わない。
 # 置き場所は索引の隣を実際に見て決める。候補は PI パッケージ（ICH E3 の番号）と作業用の
 # output/ の2つの並びで、どちらも同じスクリプトで作れるようにしてある。
-ACRF_CAND = ['16_1_2_acrf', 'acrf', os.path.join('..', 'input', 'acrf')]
-TLF_CAND = [os.path.join('14_tlf', 'ja'), os.path.join('tlf', 'ja'),
-            os.path.join('14_tlf', 'en'), os.path.join('tlf', 'en')]
+# 作業用の並びでは索引が output/deliver/r/ にあり、図表は output/tlf/r-<言語>/ にある
+# （実装系統と言語でディレクトリを分ける。方針の正本は nnh/trial-planning-and-analysis の
+# pipeline/analysis-pipeline-plan.md「フォルダ構成と命名規則」）。パッケージ内は言語だけで
+# 分ければ足りるので 14_tlf/<言語> のままにする（納品するのは R 系の1系統だけ）。
+ACRF_CAND = ['16_1_2_acrf', 'acrf', os.path.join('..', '..', '..', 'input', 'acrf'),
+             os.path.join('..', 'input', 'acrf')]
+TLF_CAND = [os.path.join('14_tlf', 'ja'), os.path.join('..', '..', 'tlf', 'r-ja'),
+            os.path.join('14_tlf', 'en'), os.path.join('..', '..', 'tlf', 'r-en')]
 
 
 def resolve_base(given, cands):
@@ -88,11 +93,12 @@ TLF_BASE = resolve_base(args.tlf_base, TLF_CAND)
 # 眺めたいときの入口になる。置き場所はパッケージなら 14_tlf/ 直下、作業用なら索引と同じ
 # フォルダで、名前は <試験ID>_TLF_<日付>_<言語>[_r].html。同じ言語が複数あれば
 # 名前の並びで最後のもの（日付が新しいもの）を採る
-WHOLE_CAND = ['14_tlf', 'tlf', '']
+def whole_cands(lang):
+    return ['14_tlf', os.path.join('..', '..', 'tlf', 'r-' + lang), '']
 
 
 def whole_tlf(lang):
-    for c in WHOLE_CAND:
+    for c in whole_cands(lang):
         hits = sorted(p for p in glob.glob(os.path.join(OUTDIR, c, '*_TLF_*.html'))
                       if re.search(r'_' + lang + r'(_r)?\.html$', os.path.basename(p)))
         if hits:
@@ -105,7 +111,8 @@ WHOLE = {lang: whole_tlf(lang) for lang in ('ja', 'en')}
 # 仕様書の HTML（scripts/build-spec-html.py が docs の md から作るもの）。変数の spec_ref
 # （`sdtm-spec.md §3.7`）と解析の output_id（`Out-5.2.1`）から節へ直接リンクする。節の id は
 # 生成した HTML を実際に読んで拾い、実在する節だけリンクする（無い節へは飛ばさない）
-SPEC_CAND = ['16_1_9_methods', 'spec']
+# パッケージなら 16_1_9_methods、作業用なら output/spec（索引は output/deliver/r/ にある）
+SPEC_CAND = ['16_1_9_methods', 'spec', os.path.join('..', '..', 'spec')]
 SPEC_BASE = ''
 SPEC_IDS = {}
 for c in SPEC_CAND:
@@ -152,7 +159,9 @@ def local_html(base, name):
 
 
 def rd(name):
-    with open(os.path.join(REPO, 'docs', name), encoding='utf-8-sig', newline='') as f:
+    # 機械が読む定義は docs/metadata/ に置く（下に external/・trial-design/）
+    with open(os.path.join(REPO, 'docs', 'metadata', name),
+              encoding='utf-8-sig', newline='') as f:
         return list(csv.DictReader(f))
 
 
@@ -244,9 +253,9 @@ opts = collections.OrderedDict()
 for r in rd('crf-option-map.csv'):
     opts.setdefault(r['option_name'], []).append([r['code'], r['label']])
 
-# --- 図表（宣言の正本は docs/tlf-index.csv。表番号 lblid が図表の識別子で、そこから解析へ
+# --- 図表（宣言の正本は docs/metadata/tlf-index.csv。表番号 lblid が図表の識別子で、そこから解析へ
 #     繋がる）。2026-08-21 まで TLF.sas を正規表現で解析していたが、SAS 側も CSV から読む
-#     形にしたので同じ正本を読む（docs/tlf-declaration-design.md）---
+#     形にしたので同じ正本を読む（docs/spec/tlf-declaration-design.md）---
 disp = []
 for r in rd('tlf-index.csv'):
     lblid = r['lblid']
@@ -370,12 +379,12 @@ def scan_data(json_dir, group_keys):
 
 if BOX:
     NOTKEY = {'STUDYID', 'USUBJID', 'VISIT', 'VISITNUM', 'DOMAIN'}
-    read_define(os.path.join(BOX, 'input', 'sdtm', 'define.xml'))
-    read_define(os.path.join(BOX, 'input', 'ads', 'define.xml'))
-    scan_data(os.path.join(BOX, 'input', 'sdtm', 'json'),
+    read_define(os.path.join(BOX, 'datasets', 'sas', 'sdtm', 'define.xml'))
+    read_define(os.path.join(BOX, 'datasets', 'sas', 'adam', 'define.xml'))
+    scan_data(os.path.join(BOX, 'datasets', 'sas', 'sdtm', 'json'),
               lambda ds, cols: [k for k in dsmeta.get(ds, {}).get('keys', [])
                                 if k not in NOTKEY and not k.endswith('DTC')])
-    scan_data(os.path.join(BOX, 'input', 'ads', 'json'),
+    scan_data(os.path.join(BOX, 'datasets', 'sas', 'adam', 'json'),
               lambda ds, cols: ['PARAMCD'] if 'PARAMCD' in cols else [])
     # ADaM の PARAMCD と --SPID の実値。CRF 項目が持つ値レベルの条件（LBTESTCD='MJBCRABL'）を
     # ADaM の行位置（PARAMCD='MJBCRABL'）へ言い換えるのに使う。対応表は持たず実値の一致で決める。
@@ -393,7 +402,7 @@ if BOX:
                 if c.endswith('SPID') and isinstance(v, list):
                     sp[c].update(v)
         adamv[ds] = {'paramcd': pc, 'spid': {k: sorted(v) for k, v in sp.items()}}
-    p = os.path.join(BOX, 'input', 'ads', 'ard_cards.csv')
+    p = os.path.join(BOX, 'datasets', 'sas', 'ard', 'ard_cards.csv')
     if os.path.exists(p):
         with open(p, encoding='utf-8-sig', newline='') as f:
             ard_rows = [{c: (r.get(c) or '') for c in ARD_COLS} for r in csv.DictReader(f)]
@@ -409,7 +418,7 @@ if BOX:
                 if v:
                     spid[dom].add(v)
     # データセットのラベルは define.xml に無いので受領時の一覧から取る
-    p = os.path.join(BOX, 'input', 'sdtm', 'sdtm_datasets.csv')
+    p = os.path.join(BOX, 'datasets', 'sas', 'sdtm', 'sdtm_datasets.csv')
     if os.path.exists(p):
         with open(p, encoding='utf-8-sig', newline='') as f:
             for r in csv.DictReader(f):
@@ -470,7 +479,7 @@ def _wds_lineage(path):
     return {w: sorted(resolve(w)) for w in made if w.startswith('_')}
 
 
-WDS = _wds_lineage(os.path.join(REPO, 'program', boxpath.trial_id() + '_ARD.sas'))
+WDS = _wds_lineage(os.path.join(REPO, 'program', 'sas', boxpath.trial_id() + '_ARD.sas'))
 
 
 # ARD の由来列（src_data）から ADaM のデータセット名と where 句を取り出す。
@@ -615,7 +624,6 @@ with open(TPL, encoding='utf-8') as f:
 
 html = HTML.replace('__DATA__', json.dumps(DATA, ensure_ascii=False, separators=(',', ':')))
 html = html.replace('__GEN__', GEN)
-html = html.replace('__TRIAL__', boxpath.trial_id())
 os.makedirs(OUTDIR, exist_ok=True)
 open(OUT, 'w', encoding='utf-8', newline='\n').write(html)
 print(f'{OUT} を書いた（{os.path.getsize(OUT):,} バイト）')

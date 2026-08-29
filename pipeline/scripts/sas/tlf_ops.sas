@@ -2,7 +2,7 @@
 program name : tlf_ops.sas
 description  : ARD から図表を描画する表示マクロ。図表の並びは TLF 本体が宣言する。
 usage        : <試験ID>_TLF.sas から %include する。
-comment      : 入力は ads.ard だけにする（data-first）。同じ結果値を複数の表示に使い回せる。
+comment      : 入力は ard.ard だけにする（data-first）。同じ結果値を複数の表示に使い回せる。
                図（Kaplan-Meier 曲線）のみ ads.adtte を直接使う。ARD は報告する統計量を
                持つが曲線の全点は持たないため。
                表示桁は SAP 3.3.2（割合は小数第1位、推定値は個別データの1桁下）。
@@ -13,15 +13,15 @@ comment      : 入力は ads.ard だけにする（data-first）。同じ結果�
 ========================================================================================*/
 
 /*========================================================================================
-  表示文言のカタログ。正本は docs/label-catalog.csv。
+  表示文言のカタログ。正本は docs/metadata/label-catalog.csv。
   &lang で出力言語を切り替える（en が既定。ja にすると日本語で出る）。
   ラベルをここに直書きしないこと。追加・修正はカタログ側で行う。
-  設計は docs/label-and-traceability-design.md。
+  設計は docs/spec/label-and-traceability-design.md。
 ========================================================================================*/
 
 %global lang;
 
-filename _labcsv "&repo_root/docs/label-catalog.csv" encoding='utf-8';
+filename _labcsv "&repo_root/docs/metadata/label-catalog.csv" encoding='utf-8';
 proc import out=_labcat datafile=_labcsv dbms=csv replace;
   getnames=yes;
   guessingrows=max;
@@ -60,11 +60,21 @@ proc format cntlin=_labfmt; run;
   data _lvcat;
     set _labcat(where=(strip(kind) = 'level'));
     length LVKEY $80 LVLBL $200;
+    /* 水準の並び順（kind=level の order 列）。入れた水準はこの番号で、入れていない水準は
+       識別子（ARD の VARLEVEL）で並べる。表示名で並べると符号化を変えたときに順序が
+       変わり、日英でも並びが食い違う（2026-08-23。CP932 から UTF-8 への移行で12表が動いた）*/
+    LVORD = input(strip(vvalue(order)), ?? best8.);
+    if missing(LVORD) then LVORD = 9999;
+    /* 来院番号（kind=level の visitnum 列）。SDTM の TV ドメインの VISITNUM を写したもので、
+       治療相の識別子にだけ入る。図表の並びは来院計画の順を原則とするため、順序番号の次の
+       キーに使う。入っていない水準は 99999 として後ろへ回す（2026-08-23）*/
+    LVVISIT = input(strip(vvalue(visitnum)), ?? best8.);
+    if missing(LVVISIT) then LVVISIT = 99999;
     LVKEY = strip(key);
     %if %upcase(&lang) = EN %then %do; LVLBL = strip(label_en); %end;
     %else %do;                        LVLBL = strip(label_ja); %end;
     if missing(LVLBL) then LVLBL = LVKEY;
-    keep LVKEY LVLBL;
+    keep LVKEY LVLBL LVORD LVVISIT;
   run;
   proc sort data=_lvcat nodupkey; by LVKEY; run;
 
@@ -82,9 +92,13 @@ proc format cntlin=_labfmt; run;
 %mend _mklabfmt;
 %_mklabfmt
 
-/* カタログから1件引く。&lblid が未登録なら putc は空を返すので、呼び出し側で気づける。 */
+/* カタログから1件引く。&lblid が未登録なら空が返るので、呼び出し側で気づける。
+   %superq でマクロ変数の中身を「そのままの文字」として返す。表示文言には % が入る
+   （「95%信頼区間」「95% confidence interval」）ため、素の &&L_… で展開すると % の次の
+   語がマクロ呼び出しとして解決され「無効なSAS名です」で落ちる（2026-08-24 に表 5.4.9 の
+   脚注で発生）。 */
 %macro lbl(kind, key);
-&&L_&kind._&key
+%superq(L_&kind._&key)
 %mend lbl;
 
 %macro lblfx(key);
@@ -109,7 +123,7 @@ proc format cntlin=_labfmt; run;
            max(case when a.STATNAME='lcl'  then a.STAT else . end) as _l,
            max(case when a.STATNAME='ucl'  then a.STAT else . end) as _u,
            max(input(compress(a.VARLEVEL, 'Y年'), best8.)) as _ord
-    from ads.ard as a left join _lvcat as c on strip(a.VARLEVEL) = c.LVKEY
+    from ard.ard as a left join _lvcat as c on strip(a.VARLEVEL) = c.LVKEY
     where a.ANALYSID = "&analysis_id" and a.CONTEXT = 'survival'
       and a.VARLEVEL not in ('中央値', 'MEDIAN') and a.VARLEVEL ne ' '
     group by coalescec(c.LVLBL, a.VARLEVEL)
@@ -139,9 +153,9 @@ proc format cntlin=_labfmt; run;
   run;
 
   proc sql noprint;
-    select STAT into :_n  trimmed from ads.ard where ANALYSID="&analysis_id" and STATNAME='N';
-    select STAT into :_ev trimmed from ads.ard where ANALYSID="&analysis_id" and STATNAME='nevent';
-    select STAT into :_cn trimmed from ads.ard where ANALYSID="&analysis_id" and STATNAME='ncensor';
+    select STAT into :_n  trimmed from ard.ard where ANALYSID="&analysis_id" and STATNAME='N';
+    select STAT into :_ev trimmed from ard.ard where ANALYSID="&analysis_id" and STATNAME='nevent';
+    select STAT into :_cn trimmed from ard.ard where ANALYSID="&analysis_id" and STATNAME='ncensor';
   quit;
 
   %_tlfopen(&lblid)
@@ -163,9 +177,11 @@ proc format cntlin=_labfmt; run;
 %mend tab_km;
 
 /*========================================================================================
-  HTML 版の図表（1図表=1ファイル）。追跡索引（output/traceability.html）から図表へ直接
-  飛べるようにするためで、RTF は従来どおり出る。tlfhtml=0 なら HTML は作らない。
+  HTML 版の図表（1図表=1ファイル）。トレーサビリティ索引（output/deliver/r/traceability.html）
+  から図表へ直接飛べるようにするためで、これが配布の正体である。tlfhtml=0 なら作らない。
   ファイル名は表番号（&lblid）にする。索引側は <base>/<表番号>.html を参照する。
+  tlfhtml と tlfdir の既定は呼び出し側（<試験ID>_TLF.sas）が決める。ここでは
+  未設定のときだけ作らない側へ倒す（このファイルを単独で include したときの保険）。
 ========================================================================================*/
 
 %global tlfhtml tlfdir;
@@ -188,7 +204,7 @@ proc format cntlin=_labfmt; run;
 %mend _tlfclose;
 /*========================================================================================
   図表のセル台帳。表示した1セルを1行にして貯め、最後に CSV へ出す。R系の図表（同じ
-  docs/tlf-index.csv を読んで描く）と突き合わせるための材料で、突合は
+  docs/metadata/tlf-index.csv を読んで描く）と突き合わせるための材料で、突合は
   program/r/<試験ID>_CompareTLF.R が行う。tlfcells=0 なら貯めない。
   列の並び（col_seq）は proc report の column 文の並びと同じにする。
 ========================================================================================*/
@@ -278,7 +294,7 @@ proc format cntlin=_labfmt; run;
            max(case when a.STATNAME='p'   then a.STAT else . end) as _p,
            max(case when a.STATNAME='lcl' then a.STAT else . end) as _l,
            max(case when a.STATNAME='ucl' then a.STAT else . end) as _u
-    from ads.ard as a left join _lvcat as c on strip(a.VARLEVEL) = c.LVKEY
+    from ard.ard as a left join _lvcat as c on strip(a.VARLEVEL) = c.LVKEY
     where a.ANALYSID = "&analysis_id" and a.CONTEXT = 'categorical'
     group by coalescec(c.LVLBL, a.VARLEVEL);
   quit;
@@ -324,7 +340,7 @@ proc format cntlin=_labfmt; run;
 /*========================================================================================
   1.2b 群を列に持つカテゴリ表（1解析で群が複数あるもの。SAP 5.4.3 の3列表）
   行と列の並びは ARD が順序を持たないため、呼び出し側の levels= と groups= で決める
-  （段階2で ARD 側へ移す。docs/label-and-traceability-design.md）。
+  （段階2で ARD 側へ移す。docs/spec/label-and-traceability-design.md）。
 ========================================================================================*/
 
 %macro tab_prop_grp(analysis_id=, lblid=, groups=, levels=);
@@ -336,7 +352,7 @@ proc format cntlin=_labfmt; run;
            max(case when STATNAME='n' then STAT end) as _n,
            max(case when STATNAME='N' then STAT end) as _den,
            max(case when STATNAME='p' then STAT end) as _p
-    from ads.ard
+    from ard.ard
     where ANALYSID = "&analysis_id" and CONTEXT = 'categorical'
     group by GROUP1L, VARLEVEL;
   quit;
@@ -462,7 +478,7 @@ proc format cntlin=_labfmt; run;
            max(case when STATNAME='n' then STAT end) as _n,
            max(case when STATNAME='N' then STAT end) as _den,
            max(case when STATNAME='p' then STAT end) as _p
-    from ads.ard
+    from ard.ard
     where CONTEXT = 'categorical'
       and ANALYSID in (select distinct ANALYSID from _grord)
       %if %length(&output_id) %then and OUTPUTID = "&output_id";
@@ -541,7 +557,7 @@ proc format cntlin=_labfmt; run;
   1.2c 評価時点を行に持つカテゴリ表（1つの OUTPUTID の解析を行として並べる。SAP 5.4.3.1）
   SAP の図表案は評価時点を列に置くが、23列は A4 縦の本文幅（11,185 twips）に入らない
   （n (%) のセルで約22,800 twips 必要）。行と列を入れ替えて1表にする。内容は同じ。
-  行の並びと表示名は docs/mr-timepoint.csv（%_tdmr_load）が持ち、列の並びは levels= で決める。
+  行の並びと表示名は docs/metadata/mr-timepoint.csv（%_tdmr_load）が持ち、列の並びは levels= で決める。
   SUBSET='NOSAMEDAY' の解析がある水準は、割合ではなくその件数をカッコに入れる
   （molpd・molr は88例の排他区分ではなくイベントの件数なので割合を出さない）。
 ========================================================================================*/
@@ -573,7 +589,7 @@ proc format cntlin=_labfmt; run;
     select GROUP1L, VARLEVEL, SUBSET,
            max(case when STATNAME='n' then STAT end) as _n,
            max(case when STATNAME='p' then STAT end) as _p
-    from ads.ard
+    from ard.ard
     where OUTPUTID = "&output_id" and CONTEXT = 'categorical'
     group by GROUP1L, VARLEVEL, SUBSET;
   quit;
@@ -653,13 +669,24 @@ proc format cntlin=_labfmt; run;
   1.3 背景表（連続量とカテゴリを1つの表に並べる。行順は ANALYSID の連番）
 ========================================================================================*/
 
-%macro tab_bg(output_id=, lblid=, item_var=VARIABLE, item_label=item);
-  %local nobs;
+/* item_var は | 区切りで2つまで受ける。2つ渡すと行項目を「1つ目 / 2つ目」と連結する。
+   ARD が行を区別する軸を2つ持つ表（Out-5.4.7.4・Out-5.4.7.5 は VARIABLE が感染症や
+   併用薬、GROUP1L が治療相）で、片方しか出せず同じ行ラベルが並んでいた（2026-08-23）*/
+%macro tab_bg(output_id=, lblid=, item_var=VARIABLE, item_label=item, levels=);
+  %local nobs iv1 iv2 _nlv _k;
+  %let iv1 = %scan(&item_var, 1, %str(|));
+  %let iv2 = %scan(&item_var, 2, %str(|));
   proc sql;
     create table _w as
     select a.ANALYSID, a.VARIABLE, a.GROUP1L,
            coalescec(c.LVLBL, a.VARLEVEL) as VARLEVEL length=200,
+           a.VARLEVEL as LVKEYRAW length=200,
+           c.LVORD as LVORD,
+           c.LVVISIT as LVVISIT,
            i.LVLBL as ITEMLBL length=200,
+%if %length(&iv2) %then %do;
+           j.LVLBL as ITEMLBL2 length=200,
+%end;
            max(a.CONTEXT) as CONTEXT length=20,
            max(case when a.STATNAME='n'      then a.STAT end) as _n,
            max(case when a.STATNAME='nmiss'  then a.STAT end) as _nm,
@@ -670,18 +697,28 @@ proc format cntlin=_labfmt; run;
            max(case when a.STATNAME='max'    then a.STAT end) as _max,
            max(case when a.STATNAME='N'      then a.STAT end) as _den,
            max(case when a.STATNAME='p'      then a.STAT end) as _p
-    from ads.ard as a
+    from ard.ard as a
          left join _lvcat as c on strip(a.VARLEVEL) = c.LVKEY
          /* 行項目（&item_var）の表示名も水準のカタログから引く。ENGRAFT・ITDOSE のように
             kind=level にだけ登録されているキーがあり、$bgitem だけを見ていた頃は識別子が
             そのまま印字されていた（2026-08-20）*/
-         left join _lvcat as i on strip(a.&item_var) = i.LVKEY
+         left join _lvcat as i on strip(a.&iv1) = i.LVKEY
+%if %length(&iv2) %then %do;
+         left join _lvcat as j on strip(a.&iv2) = j.LVKEY
+%end;
     where a.OUTPUTID = "&output_id"
-    group by a.ANALYSID, a.VARIABLE, a.GROUP1L, coalescec(c.LVLBL, a.VARLEVEL), i.LVLBL;
+    group by a.ANALYSID, a.VARIABLE, a.GROUP1L, coalescec(c.LVLBL, a.VARLEVEL),
+             a.VARLEVEL, c.LVORD, c.LVVISIT, i.LVLBL
+%if %length(&iv2) %then %do;
+           , j.LVLBL
+%end;
+    ;
   quit;
 
   /* proc sql の再マージで同じ行が統計量の数だけ出る。値は同一なので畳む（2026-08-20）*/
-  proc sort data=_w nodupkey; by ANALYSID VARIABLE GROUP1L VARLEVEL ITEMLBL; run;
+  proc sort data=_w nodupkey; by ANALYSID VARIABLE GROUP1L VARLEVEL LVKEYRAW LVORD LVVISIT ITEMLBL
+%if %length(&iv2) %then %do; ITEMLBL2 %end;
+  ; run;
 
   proc sql noprint; select count(*) into :nobs trimmed from _w; quit;
   %if &nobs = 0 %then %do;
@@ -691,11 +728,16 @@ proc format cntlin=_labfmt; run;
 
   data _bg2;
     set _w;
-    length ITEM $60 LEVEL $200 VALUE $60;
+    length ITEM $200 LEVEL $200 VALUE $60 _i2 $100;
     /* kind=level → kind=bgitem → 識別子そのまま、の順で引く（R 側の lvl() と同じ）。
        $bgitem は未登録の値を入力のまま返すため、level を先に見る */
-    ITEM = coalescec(ITEMLBL, put(&item_var, $bgitem.));
-    if ITEM = ' ' then ITEM = &item_var;
+    ITEM = coalescec(ITEMLBL, put(&iv1, $bgitem.));
+    if ITEM = ' ' then ITEM = &iv1;
+%if %length(&iv2) %then %do;
+    _i2 = coalescec(ITEMLBL2, put(&iv2, $bgitem.));
+    if _i2 = ' ' then _i2 = &iv2;
+    ITEM = catx(' / ', ITEM, _i2);
+%end;
     if CONTEXT = 'continuous' then do;
       LEVEL = ' ';
       VALUE = strip(put(_med, 12.1)) || ' [' || strip(put(_min, 12.1)) || ', '
@@ -707,10 +749,32 @@ proc format cntlin=_labfmt; run;
       LEVEL = VARLEVEL;
       VALUE = strip(put(_n, 8.0)) || ' (' || strip(put(_p, 8.1)) || ')';
     end;
-    keep ANALYSID ITEM LEVEL VALUE;
+    if missing(LVORD) then LVORD = 9999;
+    if missing(LVVISIT) then LVVISIT = 99999;
+    drop _i2;
+    keep ANALYSID ITEM LEVEL VALUE LVORD LVVISIT LVKEYRAW;
   run;
 
-  proc sort data=_bg2; by ANALYSID LEVEL; run;
+  /* 並びは 宣言の levels= の順 → 順序番号 → 来院番号 → 識別子。表示名では並べない
+     （符号化を変えると順序が変わり、日英でも食い違うため。2026-08-23）。
+     levels= は来院と無関係な区分（到達までの時間の区分など）を表ごとに指定するための口で、
+     指定に無い水準は後ろへ回す */
+  %let _nlv = 0;
+  %if %length(&levels) %then %let _nlv = %sysfunc(countw(&levels, %str(|)));
+  data _lvseq;
+    length LVKEYRAW $200 _LVSEQ 8;
+    %do _k = 1 %to &_nlv;
+      LVKEYRAW = "%scan(&levels, &_k, %str(|))"; _LVSEQ = &_k; output;
+    %end;
+    stop;
+  run;
+
+  proc sql;
+    create table _bg2s as
+    select a.*, coalesce(b._LVSEQ, 99999) as _LVSEQ
+    from _bg2 as a left join _lvseq as b on strip(a.LVKEYRAW) = strip(b.LVKEYRAW);
+  quit;
+  proc sort data=_bg2s out=_bg2; by ANALYSID _LVSEQ LVORD LVVISIT LVKEYRAW; run;
 
   %_tlfopen(&lblid)
 
@@ -722,7 +786,7 @@ proc format cntlin=_labfmt; run;
   proc report data=_bg2 nowd;
     column ANALYSID ITEM LEVEL VALUE;
     define ANALYSID / order noprint;
-    define ITEM     / order order=data display "%lblfx(&item_label)" width=32;
+    define ITEM     / order order=data display "%lblfx(&item_label)" width=44;
     define LEVEL    / display "%lblfx(categ)"   width=26;
     define VALUE    / display "%lblfx(summary)"   width=46;
   run;
@@ -741,6 +805,12 @@ proc format cntlin=_labfmt; run;
     AVALY = AVAL / 365.25;
   run;
 
+  /* LISTING を閉じてから描く。開いたままだと図が PNG としてカレント（リポジトリの
+     ルート）へ落ちる（SurvivalPlot.png・SurvivalPlot1.png …。2026-08-25 に判明）。
+     図は html5 の svg_mode="inline" で本文へ埋め込むので LISTING 宛の画像は要らない。
+     ods graphics on の width= は LISTING の幅も変えるため、閉じている間は
+     %tab_mrlist の列幅の計算が options ls= のままで済む */
+  ods listing close;
   ods graphics on / width=16cm height=11cm;
   %_tlfopen(&lblid)
   title1 justify=left "%lbl(ti, &lblid)";
@@ -760,6 +830,7 @@ proc format cntlin=_labfmt; run;
   title;
   ods graphics off;
   %_tlfclose
+  ods listing;
 %mend fig_km;
 
 /*========================================================================================
@@ -772,7 +843,7 @@ proc format cntlin=_labfmt; run;
 %macro tab_list(vars=, labels=, lblid=);
   %local nobs i n v k data;
   /* 一覧の元データは表番号ごとに作る。結果値の集計ではないので ARD から引けず、宣言に
-     データセット名を持たせると SAS 側の実装詳細が正本（docs/tlf-index.csv）に入る。
+     データセット名を持たせると SAS 側の実装詳細が正本（docs/metadata/tlf-index.csv）に入る。
      R系（TLF.R の d_tab_list）も同じく表番号で前処理を引く */
   %if &lblid = T_5_4_13_2 %then %do;
     %_list_abl
@@ -810,7 +881,7 @@ proc format cntlin=_labfmt; run;
 
   症例あたり2行。1行目は CRF の判定欄（ads.adrs。判定欄があるシートのみ）、2行目は
   コピー数から導出した判定（ads.adlb の MRCAT。提出された全シート）。列は 表 5.4.3.1 と
-  同じ23評価時点で、並びと列見出し（glabel）は docs/mr-timepoint.csv（%_tdmr_load）が持つ。
+  同じ23評価時点で、並びと列見出し（glabel）は docs/metadata/mr-timepoint.csv（%_tdmr_load）が持つ。
   結果値の集計ではなく症例単位の一覧なので ARD からは作れず、ADaM から直接組む
   （%tab_list と同じ作り方）。
   判定欄の値は紙幅の都合で略号にする（MOLECULAR CR → CR など。対応は脚注）。
@@ -829,7 +900,7 @@ proc format cntlin=_labfmt; run;
   %let _w2 = 45pt;   /* 種別 */
   %let _wt = 20pt;   /* 評価時点（23列を等幅）*/
 
-  /* 評価時点の並びと列見出し。正本は docs/mr-timepoint.csv */
+  /* 評価時点の並びと列見出し。正本は docs/metadata/mr-timepoint.csv */
   proc sort data=work._tdmr out=_mrtp; by order; run;
   proc sql noprint; select count(*) into :ntp trimmed from _mrtp; quit;
   %if &ntp = 0 %then %do;
@@ -969,7 +1040,7 @@ proc format cntlin=_labfmt; run;
            max(case when a.STATNAME='lcl' then a.STAT else . end) as _l,
            max(case when a.STATNAME='ucl' then a.STAT else . end) as _u,
            max(input(compress(a.VARLEVEL, 'Y年'), best8.)) as _ord
-    from ads.ard as a left join _lvcat as c on strip(a.VARLEVEL) = c.LVKEY
+    from ard.ard as a left join _lvcat as c on strip(a.VARLEVEL) = c.LVKEY
     where a.ANALYSID = "&analysis_id" and a.CONTEXT = 'cuminc' and a.VARLEVEL ne ' '
     group by coalescec(c.LVLBL, a.VARLEVEL)
     order by _ord;
@@ -996,9 +1067,9 @@ proc format cntlin=_labfmt; run;
   run;
 
   proc sql noprint;
-    select STAT into :_n  trimmed from ads.ard where ANALYSID="&analysis_id" and STATNAME='N';
-    select STAT into :_ne trimmed from ads.ard where ANALYSID="&analysis_id" and STATNAME='nevent';
-    select STAT into :_nc trimmed from ads.ard where ANALYSID="&analysis_id" and STATNAME='ncompet';
+    select STAT into :_n  trimmed from ard.ard where ANALYSID="&analysis_id" and STATNAME='N';
+    select STAT into :_ne trimmed from ard.ard where ANALYSID="&analysis_id" and STATNAME='nevent';
+    select STAT into :_nc trimmed from ard.ard where ANALYSID="&analysis_id" and STATNAME='ncompet';
   quit;
 
   %_tlfopen(&lblid)
@@ -1024,7 +1095,7 @@ proc format cntlin=_labfmt; run;
   1つの OUTPUTID の CONTEXT='count' の解析を、解析IDの順に1行ずつ並べる。
   行ラベルは水準の識別子（ALLENR・FAS・SAF・PPS・ALLHSCT・PNINTRO）をカタログで引く。
   2026-08-20 に TLF.sas の直書きの proc report をここへ移した。マクロ呼び出しでないと
-  docs/tlf-index.csv に載らず、R系が描かず、セル台帳にも載らないため。
+  docs/metadata/tlf-index.csv に載らず、R系が描かず、セル台帳にも載らないため。
 ========================================================================================*/
 
 %macro tab_count(output_id=, lblid=);
@@ -1035,7 +1106,7 @@ proc format cntlin=_labfmt; run;
     select a.ANALYSID,
            coalescec(c.LVLBL, a.VARLEVEL) as CATEG length=200,
            a.STAT as _n
-    from ads.ard as a left join _lvcat as c on strip(a.VARLEVEL) = c.LVKEY
+    from ard.ard as a left join _lvcat as c on strip(a.VARLEVEL) = c.LVKEY
     where a.OUTPUTID = "&output_id" and a.CONTEXT = 'count' and a.STATNAME = 'n'
     order by a.ANALYSID;
   quit;
@@ -1110,7 +1181,7 @@ proc format cntlin=_labfmt; run;
            max(case when a.STATNAME='min'    then a.STAT end) as _min,
            max(case when a.STATNAME='max'    then a.STAT end) as _max,
            max(case when a.STATNAME='p'      then a.STAT end) as _p
-    from ads.ard as a
+    from ard.ard as a
          inner join _crsord as o on strip(a.SUBSET)   = strip(o.SUBSET)
          left  join _lvcat  as s on strip(a.SUBSET)   = s.LVKEY
          left  join _lvcat  as g on strip(a.GROUP1L)  = g.LVKEY
@@ -1207,7 +1278,7 @@ proc format cntlin=_labfmt; run;
     proc sql noprint;
       create table _aesp as
       select distinct GROUP1L as PHASE length=20, SUBSET as TKIG length=20
-      from ads.ard where OUTPUTID = "&output_id"
+      from ard.ard where OUTPUTID = "&output_id"
       order by TKIG, PHASE;
       select count(*) into :n trimmed from _aesp;
     quit;
@@ -1230,7 +1301,7 @@ proc format cntlin=_labfmt; run;
            max(case when STATNAME='n' and VARLEVEL='Grade 3'         then STAT end) as G3,
            max(case when STATNAME='n' and VARLEVEL='Grade 4'         then STAT end) as G4,
            max(case when STATNAME='n' and VARLEVEL='Grade 5'         then STAT end) as G5
-    from ads.ard
+    from ard.ard
     where OUTPUTID = "&output_id" %if %length(&filter) %then and &filter;
     group by GROUP1L, SUBSET, VARIABLE;
   quit;
@@ -1272,23 +1343,23 @@ proc format cntlin=_labfmt; run;
 /*========================================================================================
   第2章 前処理
 
-  結果値の集計ではない図表の元データを作る。宣言（docs/tlf-index.csv）にはデータセット名
+  結果値の集計ではない図表の元データを作る。宣言（docs/metadata/tlf-index.csv）にはデータセット名
   を持たせない。SAS のデータセット名は実装の詳細で、正本に混ぜると R系が読めない列に
   なるため。表示型が表番号から前処理を引く（R系の d_tab_list も同じ形）。
 ========================================================================================*/
 
-/* 分子遺伝学的効果の23評価時点。正本は docs/mr-timepoint.csv（ARD.sas 第11章と同じ表）。
+/* 分子遺伝学的効果の23評価時点。正本は docs/metadata/mr-timepoint.csv（ARD.sas 第11章と同じ表）。
    表 5.4.3.1（%tab_prop_tp）が行の並びと表示名に、表 5.4.3.2（%tab_mrlist）が列の並びと
    列見出しに使う。2度目以降は読み直さない */
 %macro _tdmr_load;
   %if not %sysfunc(exist(work._tdmr)) %then %do;
-    filename _mrcsv "&repo_root/docs/mr-timepoint.csv" encoding='utf-8';
+    filename _mrcsv "&repo_root/docs/metadata/mr-timepoint.csv" encoding='utf-8';
     proc import out=work._tdmr datafile=_mrcsv dbms=csv replace;
       getnames=yes;
       guessingrows=max;
     run;
     filename _mrcsv clear;
-    %put NOTE: [TLF] 評価時点を読んだ: docs/mr-timepoint.csv;
+    %put NOTE: [TLF] 評価時点を読んだ: docs/metadata/mr-timepoint.csv;
   %end;
 %mend _tdmr_load;
 
@@ -1316,7 +1387,7 @@ proc format cntlin=_labfmt; run;
     keep SUBJID CTX ABLMUTDT TRGDT TRGDYC ABLMUT HSCTC RELC;
   run;
   /* ADSL.ABLMUT は識別子（MUTNONE 等）なので表示名に引き当てる。SDTM を ASCII だけで
-     構成したため和文は docs/label-catalog.csv の kind=level が持つ（2026-08-20）*/
+     構成したため和文は docs/metadata/label-catalog.csv の kind=level が持つ（2026-08-20）*/
   proc sql;
     create table _abllist2 as
     select a.*, coalescec(c.LVLBL, a.ABLMUT) as ABLMUTL length=40
@@ -1330,16 +1401,117 @@ proc format cntlin=_labfmt; run;
   第3章 宣言の駆動
 
   図表の宣言（どの表番号を、どの表示型で、どの解析から描くか）の正本は
-  docs/tlf-index.csv で、SAS系・R系・追跡索引の3つが同じものを読む。設計は
-  docs/tlf-declaration-design.md。
+  docs/metadata/tlf-index.csv で、SAS系・R系・トレーサビリティ索引の3つが同じものを読む。設計は
+  docs/spec/tlf-declaration-design.md。
 ========================================================================================*/
+
+/*========================================================================================
+  1.13 参考併記の表（SAP 5.4.9）
+
+  本試験と PhALL208・PhALL213 を3列で並べる。行の定義と他2試験の文献値は
+  docs/metadata/reference-table-rows.csv が持ち、文献値は docs/metadata/reference-values.csv が持つ。
+  文献値は解析の結果ではないので ARD には置かない
+  （ARD は本試験のデータから作るもので、外から持ち込んだ値を混ぜない）。本試験の値は行ごとに
+  違う解析から引くため、宣言に analysis_id を1つ書く形にしない。
+  行ごとの引き方は仕様 CSV の stat 列が決める。
+    n_total ... 例数（ARD の N）
+    pct_n   ... 割合。<p>% (<n>/<N>)
+    km_ci   ... KM の時点推定。<surv>% (95%CI: <lcl>-<ucl>%)。surv・lcl・ucl は 0-1 の比率
+    空      ... 本試験でも値を出さない行（見出しの行、時点別の内訳に譲る行）
+========================================================================================*/
+
+%macro tab_ref(lblid=, rows=metadata/reference-table-rows.csv, vals=metadata/reference-values.csv);
+  %local nobs;
+  /* 行の定義（並び・引く解析・引き方）と文献値を別のファイルに持つ。文献値は試験ごとに
+     行が増える縦持ち（docs/metadata/reference-values.csv。出典と注記は reference-values-source.md）、
+     行の定義は表の構造（docs/metadata/reference-table-rows.csv）で、item で結合する。
+     空欄の多い列を数値と判定されないよう infile で読む（tlf_read と同じ理由） */
+  data _refrow;
+    infile "&repo_root/docs/&rows" dsd dlm=',' truncover firstobs=2
+           encoding='utf-8' lrecl=1024;
+    length _ord 8 _item $40 _lab $40 _aid $40 _lv $40 _stat $12;
+    input _ord _item $ _lab $ _aid $ _lv $ _stat $;
+  run;
+  data _refval;
+    infile "&repo_root/docs/&vals" dsd dlm=',' truncover firstobs=2
+           encoding='utf-8' lrecl=1024;
+    length _trial $20 _item $40 _val $120 _note $200 _src $80;
+    input _trial $ _item $ _val $ _note $ _src $;
+  run;
+
+  proc sql;
+    create table _refj as
+    select r._ord, r._lab, r._stat,
+           max(case when v._trial = 'PhALL208' then v._val else '' end) as _t208 length=120,
+           max(case when v._trial = 'PhALL213' then v._val else '' end) as _t213 length=120,
+           max(case when a.STATNAME = 'n'    then a.STAT else . end) as _n,
+           max(case when a.STATNAME = 'N'    then a.STAT else . end) as _bn,
+           max(case when a.STATNAME = 'p'    then a.STAT else . end) as _p,
+           max(case when a.STATNAME = 'surv' then a.STAT else . end) as _s,
+           max(case when a.STATNAME = 'lcl'  then a.STAT else . end) as _l,
+           max(case when a.STATNAME = 'ucl'  then a.STAT else . end) as _u
+    from _refrow as r
+         left join _refval as v on strip(r._item) = strip(v._item)
+         left join ard.ard as a
+           on strip(a.ANALYSID) = strip(r._aid) and strip(a.VARLEVEL) = strip(r._lv)
+    group by r._ord, r._lab, r._stat
+    order by r._ord;
+  quit;
+
+  proc sql noprint; select count(*) into :nobs trimmed from _refj; quit;
+  %if &nobs = 0 %then %do;
+    %put WARNING: [TLF] &lblid の行の定義が読めない。表を作らない;
+    %return;
+  %end;
+
+  data _ref;
+    set _refj;
+    length ITEM $200 OWN $60 T208 $120 T213 $120;
+    ITEM = strip(put(_lab, $bgitem.));
+    if missing(ITEM) then ITEM = strip(_lab);
+         if missing(_stat)                          then OWN = '';
+    else if _stat = 'n_total' and not missing(_bn)  then OWN = strip(put(_bn, 8.0));
+    else if _stat = 'pct_n'   and not missing(_p)
+         then OWN = catx(' ', cats(put(_p, 8.1), '%'),
+                         cats('(', put(_n, 8.0), '/', put(_bn, 8.0), ')'));
+    else if _stat = 'km_ci'   and not missing(_s)
+         /* cats は引数の前後の空白を落とすので「(95%CI: 」の末尾の空白が消える。
+            R 側と1文字ずれるため、空白は catx の区切りで入れる */
+         then OWN = catx(' ', cats(put(100 * _s, 8.1), '%'), '(95%CI:',
+                         cats(put(100 * _l, 8.1), '-',
+                              put(100 * _u, 8.1), '%)'));
+    else OWN = '-';
+    T208 = _t208;
+    T213 = _t213;
+    keep _ord ITEM OWN T208 T213;
+  run;
+
+  %_tlfopen(&lblid)
+
+  title1 justify=left "%lbl(ti, &lblid)";
+  title2 justify=left "%lbl(su, &lblid)";
+  footnote1 justify=left "%lbl(fo, &lblid)";
+  %_tlfcells(_ref, &lblid, tab_ref, %str(ITEM OWN T208 T213))
+
+  proc report data=_ref nowd;
+    column _ord ITEM OWN T208 T213;
+    define _ord / order noprint;
+    define ITEM / display "%lbl(ro, &lblid)"  width=34;
+    define OWN  / display "%lblfx(ref_own)"   width=26;
+    define T208 / display "%lblfx(ref_208)"   width=26;
+    define T213 / display "%lblfx(ref_213)"   width=30;
+  run;
+  title; footnote;
+  %_tlfclose
+%mend tab_ref;
+
 
 /* 宣言を読む。proc import は空欄の多い列を数値と判定して宣言を黙って落とすので使わない。
    列の並びは CSV のヘッダで固定し（並びの検査は scripts/check-tlf-index.py が持つ）、
    ヘッダ行は読み飛ばす。CSV は BOM 付き UTF-8（Excel で開くため）で、BOM はヘッダ行に
    だけ乗るので firstobs=2 で避けられる */
 %macro tlf_read(path=, out=work._tlfidx);
-  %if %length(&path) = 0 %then %let path = &repo_root/docs/tlf-index.csv;
+  %if %length(&path) = 0 %then %let path = &repo_root/docs/metadata/tlf-index.csv;
   data &out;
     infile "&path" dsd dlm=',' truncover firstobs=2 encoding='utf-8' lrecl=32767;
     length seq 8 lblid $20 display $20 analysis_id $40 output_id $40 filter $200
@@ -1357,7 +1529,7 @@ proc format cntlin=_labfmt; run;
 %macro tlf_run(idx=work._tlfidx);
   %local n i _disp _args;
   proc sql noprint; select count(*) into :n trimmed from &idx; quit;
-  %put NOTE: [TLF] 宣言 &n 件を描く（正本 docs/tlf-index.csv）;
+  %put NOTE: [TLF] 宣言 &n 件を描く（正本 docs/metadata/tlf-index.csv）;
   %do i = 1 %to &n;
     data _null_;
       set &idx(firstobs=&i obs=&i);
