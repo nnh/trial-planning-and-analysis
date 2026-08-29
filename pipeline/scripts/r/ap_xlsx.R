@@ -229,7 +229,9 @@ ap_xlsx_km <- function(wb, lblid, title, subtitle, curves, atrisk, tx, xmax = 5)
   wb$add_data(sheet = sh, x = tx$curvedata, dims = paste0("A", dt))
   wb$add_font(sheet = sh, dims = paste0("A", dt), bold = "1")
   hdr <- dt + 1L
-  wb$add_data(sheet = sh, x = dat, dims = paste0("A", hdr), na.strings = "")
+  ## 欠測は空セルにする。na.strings に "" を渡すと空文字列のセルになり、Excel は
+  ## それを 0 と読む。打ち切りの系列が横軸に沿って 0% に並んだ（2026-08-29）
+  wb$add_data(sheet = sh, x = dat, dims = paste0("A", hdr), na.strings = NULL)
   xl_style_table(wb, sh, hdr, nrow(dat), ncol(dat), NULL, freeze = FALSE)
   wb$add_numfmt(sheet = sh,
                 dims = paste0("A", hdr + 1, ":", xl_ref(ncol(dat)), hdr + nrow(dat)),
@@ -242,7 +244,10 @@ ap_xlsx_km <- function(wb, lblid, title, subtitle, curves, atrisk, tx, xmax = 5)
   sn <- names(dat)[-1]
   st <- xl_km_style(curves)
   ch <- mschart::ms_scatterchart(data = wd, x = names(dat)[1], y = sn)
-  ch <- mschart::chart_settings(ch, scatterstyle = "lineMarker")
+  ## 引数名は style。scatterstyle という名前は無く、渡しても ... に落ちて黙って
+  ## 無視される。既定は "marker" で、そのままだと系列の線が noFill になり
+  ## 曲線が1本も描かれない（2026-08-29 に Excel の図を画像で見て判明）
+  ch <- mschart::chart_settings(ch, style = "lineMarker")
   ch <- mschart::chart_data_symbol(ch, values = stats::setNames(st$symbol, sn))
   ch <- mschart::chart_data_line_style(ch, values = stats::setNames(st$line, sn))
   ch <- mschart::chart_data_stroke(ch, values = stats::setNames(st$color, sn))
@@ -250,7 +255,10 @@ ap_xlsx_km <- function(wb, lblid, title, subtitle, curves, atrisk, tx, xmax = 5)
   ch <- mschart::chart_data_size(ch, values = stats::setNames(st$size, sn))
   ## 折れ線を滑らかにしない。階段の角が丸まると打ち切りの位置が読めなくなる
   ch <- mschart::chart_data_smooth(ch, values = stats::setNames(rep(0, length(sn)), sn))
-  ch <- mschart::chart_ax_x(ch, limit_min = 0, limit_max = xmax, num_fmt = "0")
+  ## 目盛を1年ごとに固定する。major_unit を指定しないと 0.5 刻みになり、
+  ## 整数の書式と組み合わさって 0・1・1・2・2 と重複した目盛に見える
+  ch <- mschart::chart_ax_x(ch, limit_min = 0, limit_max = xmax, num_fmt = "0",
+                            major_unit = 1)
   ch <- mschart::chart_ax_y(ch, limit_min = 0, limit_max = 1, num_fmt = "0%")
   ch <- mschart::chart_labels(ch, xlab = tx$xaxis, ylab = tx$yaxis)
   wb$add_mschart(sheet = sh, dims = paste0("A", chart_top, ":J", chart_bottom), graph = ch)
@@ -310,7 +318,8 @@ xl_km_style <- function(curves) {
     sym <- c(sym, "none", "none", "none", "plus")
     ln  <- c(ln, "solid", "dashed", "dashed", "none")
     col <- c(col, cc, cc, cc, cc)
-    sz  <- c(sz, 5, 5, 5, 7)
+    ## 打ち切りの目印は小さくする。大きいと点が連なって帯に見え、曲線が読めない
+    sz  <- c(sz, 5, 5, 5, 4)
   }
   list(symbol = sym, line = ln, color = col, size = sz)
 }

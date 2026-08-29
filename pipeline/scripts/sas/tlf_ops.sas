@@ -264,10 +264,35 @@ proc format cntlin=_labfmt; run;
     TITLE = strip(prxchange('s/\s*&(ph|tk)\b//i', -1, strip(TITLE)));
   run;
 
-  /* Excel にも同じ目次が先頭のシートとして入る（R系のブックと同じ形）。ここで名前を
-     付けておく。リンクはシートではなく HTML の錨を指すので Excel では効かない */
+  /* 目次は出力先ごとに作り分ける。HTML は同一ページ内の錨（#表番号）へ飛ばし、
+     Excel はシートへの参照で飛ばす。1つの url= では両方を満たせない。ODS は url= を
+     外部リンク（TargetMode="External"）として書くため、Excel では `#表番号` が
+     開けない URL になり、押しても何も起きない（2026-08-29 に実測して判明）。
+     Excel 側は HYPERLINK 関数をセルの数式として書き、同じブックのシートへ飛ばす。 */
   %if &tlfxlsx = 1 %then %do;
+    ods html5(id=all) exclude all;
     ods excel(id=x) options(sheet_name="%lblfx(toc)");
+    title1 justify=left "&tlfttl";
+    title2 justify=left "%lblfx(toc)";
+    ods listing close;
+    proc report data=_toc nowd noheader
+        style(report)={frame=void rules=none cellspacing=0}
+        style(column)={fontsize=9pt borderwidth=0};
+      column LBLID TITLE;
+      define LBLID / display noprint;
+      define TITLE / display;
+      compute TITLE;
+        length _f $400;
+        _f = cats('formula:=HYPERLINK(',
+                  quote(cats('#', strip(LBLID), '!A1')), ',',
+                  quote(strip(TITLE)), ')');
+        call define(_col_, 'style', cats('style={tagattr=', quote(strip(_f)), '}'));
+      endcomp;
+    run;
+    ods listing;
+    title;
+    ods html5(id=all) select all;
+    ods excel(id=x) exclude all;
   %end;
   title1 justify=left "&tlfttl";
   title2 justify=left "%lblfx(toc)";
@@ -286,6 +311,9 @@ proc format cntlin=_labfmt; run;
   run;
   ods listing;
   title;
+  %if &tlfxlsx = 1 %then %do;
+    ods excel(id=x) select all;
+  %end;
 %mend _tlftoc;
 
 %macro _tlfclose;
