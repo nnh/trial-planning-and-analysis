@@ -1,15 +1,19 @@
-# 立案時レビュー
+# レビュー
 
 作成日：2026-08-22
-改訂日：2026-08-22
+改訂日：2026-09-06
 
-試験の入口で、解析が途中で人の判断待ちになる原因を先に潰すための一式。対象は4つで、それぞれサブディレクトリを持つ。
+試験の入口と出口で行うレビューの一式。
+
+入口では、解析が途中で人の判断待ちになる原因を先に潰す。対象は3つで、それぞれサブディレクトリを持つ。
 
 - [planning-review/](planning-review/README.md) — 研究計画書（PRT）と図表案のレビュー
 - [sap-review/](sap-review/checklist.md) — 統計解析計画書（SAP）のレビューと、固定後のデータ検証・解析対象集団フラグ確定・生存時間解析変数命名の規約。固定前に一度に決め切る事項の一覧は [sap-review/upfront-decisions.md](sap-review/upfront-decisions.md)
 - [ecrf-review/](ecrf-review/README.md) — 電子症例報告書の構造定義（Ptosh の JSON）のレビュー
 
-各サブディレクトリが手順（チェックリスト）・機械検査（Python スクリプト）・蓄積（findings-log.md）の3点セットを持つ。3点セットが揃うと、判断の要る項目だけが人に残り、規則で判定できるものは自動で拾われ、拾えたものが次の試験へ引き継がれる。
+出口では、納品の前に独立レビューを行う。1回で終わらないので、回数を重ねる前提で設計する。回ごとの対象の切り分け、Critical の定義に必ず入れる除外、渡し方、結果の受け取り方は [final-review/strategy.md](final-review/strategy.md) が持つ。
+
+入口の各サブディレクトリが手順（チェックリスト）・機械検査（Python スクリプト）・蓄積（findings-log.md）の3点セットを持つ。3点セットが揃うと、判断の要る項目だけが人に残り、規則で判定できるものは自動で拾われ、拾えたものが次の試験へ引き継がれる。
 
 まとめて実行するスキルは [../skills/trial-planning-review/](../skills/trial-planning-review/SKILL.md) にある。
 
