@@ -1,0 +1,17 @@
+# 改行コードの扱い。リポジトリの中も作業ツリーも LF に揃える。
+#
+# eol=lf まで指定するのは、納品パッケージの同一性を端末に依存させないためである。
+# text=auto だけだと Windows のチェックアウトで CRLF になり、同じコミットから
+# 組み立てたパッケージのハッシュが端末ごとに違う。改行以外の差が無くても、
+# 同一性の照合そのものが意味を失う。
+* text=auto eol=lf
+
+# 画像・帳票・書庫は変換しない
+*.png binary
+*.jpg binary
+*.pdf binary
+*.xlsx binary
+*.docx binary
+*.zip binary
+*.sas7bdat binary
+*.xpt binary

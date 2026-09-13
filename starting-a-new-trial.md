@@ -67,7 +67,7 @@ git -C "$TRIAL" init
 - `autoexec.sas` — SAS がルートで読む設定。データの置き場を環境変数と実行端末から解決し、[同「フォルダ構成と命名規則」](pipeline/analysis-pipeline-plan.md)の層ごとにライブラリを割り当てる。置き場をプログラム本体へ書かないためのもので、試験の識別子とグループ名以外は試験をまたいで同じにする。
 - `.Rprofile` と `renv/`・`renv.lock` — R がルートで読む設定と、パッケージの版の固定。R はリポジトリのルートをカレントにして起動する。別の場所から起動すると版の固定も共通基盤の探索も効かない。
 - `.gitignore` — 受領物・実行ログ・出力・突合結果をディレクトリ単位で除外する。拡張子だけの除外に頼らない。被験者単位のデータを持つファイルをその外へ置くときは個別に足す。git に置かないものの一覧は[同「着手前チェック」](pipeline/analysis-pipeline-plan.md)の禁止・制約事項が持つ。
-- `.gitattributes` — 改行を LF に揃える。揃えない場合に何が起きるかは[同「命名の規約と既定」](pipeline/analysis-pipeline-plan.md)が持つ。
+- `.gitattributes` — 改行を LF に揃える。[templates/gitattributes](templates/gitattributes) を写して使う（`cp` の先でドットを付ける）。自分で書くと `eol=lf` を落としやすく、そうすると Windows のチェックアウトだけ CRLF になって、同じコミットから組み立てた納品パッケージのハッシュが端末ごとに違う。揃えない場合に何が起きるかは[同「命名の規約と既定」](pipeline/analysis-pipeline-plan.md)が持つ。
 - `docs/README.md` — `docs/` の見取り図。区分の意味は上記の節を指し、この試験で実際に置いたファイルの1行説明だけを書く。
 
 ### 4.2. 雛形の配置
