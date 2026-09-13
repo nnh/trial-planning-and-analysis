@@ -42,11 +42,17 @@
 # 混ぜたまま突合が「不一致0」で通る（C3-127）。段階ごとの記録は Box の
 # output/qc/release-manifest.json に置く（成果物と同じで git 管理外）。
 #
-# 確かめるのはコミットと成果物のハッシュだけではない。受領データ直下の指紋も記録し、
-# 前の回と違えば再利用させない。コミットが同じままでも受領データは差し替わる（再抽出）。
-# 指紋が無いと、記録した成果物さえ据え置けば別のカットの層を混ぜられる。
+# 確かめるのはコミットと成果物のハッシュだけではない。受領データ直下の指紋、宣言
+# （docs/metadata・docs/validation/acceptance の CSV）の指紋、環境の版も記録し、前の回と
+# 違えば再利用させない。コミットが同じままでも受領データは差し替わり（再抽出）、宣言は
+# 直され、処理系は入れ替わる。どれも成果物の意味を変えるが、コミットには現れない。
 # また、ある段階を回し直したら、それより後の段階の成功記録は捨てる。残すと、途中で
 # 落ちた回でも以前の後続段階が「同じ回に通った」ものとして再利用される。
+#
+# 段ごとの成果物のうち、枠組みが名前を知っているのは段階1・2・3・4・6 である。突合と
+# 視覚回帰の出力は試験側のプログラムが決めるので名指しできない。試験側が
+# docs/metadata/release-artifacts.csv に宣言する。宣言の無い段を飛ばそうとすると、
+# 実施した記録だけでは同じ回のものだと確かめられないので落とす。
 #
 # 終了コード 0 全段階が通った / 1 どこかで落ちた
 import argparse
@@ -97,7 +103,19 @@ STEP_ARTIFACTS = {
         ('output', 'compare', 'tlf_cells_r_en.csv'),
         ('output', 'compare', 'tlf_cells_rsas_ja.csv'),
         ('output', 'compare', 'tlf_cells_rsas_en.csv')],
+    3: [('datasets', 'define', 'adam', 'define.xml')],
+    4: [('output', 'tlf', 'traceability.html')],
+    6: [('datasets', 'sas', 'ard', 'reporting-event-sas.json'),
+        ('datasets', 'r', 'ard', 'reporting-event-r.json')],
 }
+
+# 枠組みが名前を知らない成果物は試験側が宣言する。突合と視覚回帰の出力は試験側の
+# プログラムが決めるので、ここで名指しできない。宣言が無い段は、実施の記録だけで
+# 再利用されることになるため、飛ばす対象になったときに落とす。
+DECLARED_ARTIFACTS = ('docs', 'metadata', 'release-artifacts.csv')
+
+# 宣言の指紋に入れる置き場。回ごとに変わらないが、版が変われば成果物の意味が変わる
+DECL_DIRS = (('docs', 'metadata'), ('docs', 'validation', 'acceptance'))
 
 # 受領データの置き場。解析が読むのは直下だけ（data-verification.md 4.9）
 INPUT_PARTS = ('input', 'rawdata')
@@ -111,6 +129,48 @@ def rel_key(parts):
 def norm_key(key):
     """記録から読んだ鍵の区切りを揃える。旧い記録は \\ で綴られている。"""
     return key.replace(chr(92), '/')
+
+
+def declared_artifacts(repo):
+    """試験側が宣言した段ごとの成果物。無ければ空。"""
+    p = os.path.join(repo, *DECLARED_ARTIFACTS)
+    out = {}
+    if not os.path.isfile(p):
+        return out
+    import csv
+    with open(p, encoding='utf-8-sig', newline='') as f:
+        rdr = csv.DictReader(f)
+        if not rdr.fieldnames or 'step' not in rdr.fieldnames or 'path' not in rdr.fieldnames:
+            return out
+        for r in rdr:
+            s = (r.get('step') or '').strip()
+            path = (r.get('path') or '').strip().replace(chr(92), '/')
+            if s.isdigit() and path:
+                out.setdefault(int(s), []).append(tuple(path.split('/')))
+    return out
+
+
+def decl_digest(repo):
+    """宣言の指紋。宣言が変われば、同じコミットでも成果物の意味が変わる。"""
+    h = hashlib.sha256()
+    for parts in DECL_DIRS:
+        d = os.path.join(repo, *parts)
+        if not os.path.isdir(d):
+            continue
+        for n in sorted(os.listdir(d)):
+            f = os.path.join(d, n)
+            if os.path.isfile(f) and n.lower().endswith('.csv'):
+                h.update(n.encode('utf-8'))
+                h.update(sha256(f).encode('ascii'))
+    return h.hexdigest()
+
+
+def env_id():
+    """環境の版。処理系が変われば数値の再現は別の話になる。"""
+    import platform
+    return '%s %s / %s %s' % (platform.python_implementation(),
+                              platform.python_version(),
+                              platform.system(), platform.machine())
 
 
 def input_digest(box):
@@ -132,11 +192,19 @@ def input_digest(box):
 
 
 class Release:
-    def __init__(self, box, commit, dirty):
+    def __init__(self, box, commit, dirty, repo=None, run_id=None):
         self.box = box
         self.commit = commit
         self.dirty = dirty
+        self.repo = repo or REPO
+        # 実行IDは1回の通しを通して同じ。段ごとの記録が同じ回のものかを、時刻でなく
+        # この値で見る。時刻は近ければ同じ回に見えるが、近いことは同じ回の証拠にならない
+        self.run_id = run_id or time.strftime('%Y%m%dT%H%M%S')
         self.manifest = os.path.join(box, 'output', 'qc', 'release-manifest.json')
+
+    def artifacts_for(self, no):
+        return list(STEP_ARTIFACTS.get(no, [])) + list(
+            declared_artifacts(self.repo).get(no, []))
 
     def load(self):
         if not os.path.isfile(self.manifest):
@@ -159,12 +227,16 @@ class Release:
         for later in [k for k in steps if k.isdigit() and int(k) > no]:
             del steps[later]
         h = {}
-        for parts in STEP_ARTIFACTS.get(no, []):
+        for parts in self.artifacts_for(no):
             f = os.path.join(self.box, *parts)
             h[rel_key(parts)] = sha256(f) if os.path.isfile(f) else ''
-        steps[str(no)] = {'at': now(), 'artifacts': h}
+        steps[str(no)] = {'at': now(), 'run': self.run_id, 'artifacts': h}
         obj = {'commit': self.commit, 'dirty': self.dirty, 'at': now(),
-               'input': input_digest(self.box), 'steps': steps}
+               'run': self.run_id,
+               'input': input_digest(self.box),
+               'declarations': decl_digest(self.repo),
+               'env': env_id(),
+               'steps': steps}
         os.makedirs(os.path.dirname(self.manifest), exist_ok=True)
         text = json.dumps(obj, ensure_ascii=False, indent=2)
         with open(self.manifest, 'w', encoding='utf-8', newline='\r\n') as f:
@@ -188,10 +260,23 @@ class Release:
         elif m.get('input') != now_input:
             bad.append('受領データが前の回から変わっている。段を飛ばすと、別のカットで'
                        '作った層が混ざる')
+        if not m.get('declarations'):
+            bad.append('前の回の記録に宣言の指紋が無い。通しで回して記録を作り直す')
+        elif m.get('declarations') != decl_digest(self.repo):
+            bad.append('宣言（docs/metadata・docs/validation/acceptance の CSV）が'
+                       '前の回から変わっている。同じコミットでも成果物の意味が変わる')
+        if m.get('env') and m.get('env') != env_id():
+            bad.append('環境が前の回と違う（前 %s / 今 %s）' % (m.get('env'), env_id()))
         for n in step_nos:
             s = (m.get('steps') or {}).get(str(n))
             if not s:
                 bad.append('[%d] を実施した記録が無い' % n)
+                continue
+            if not (s.get('artifacts') or {}):
+                bad.append('[%d] は成果物の記録を持たない。実施した記録だけでは、'
+                           '同じ回のものだと確かめられない。'
+                           'docs/metadata/release-artifacts.csv にこの段の'
+                           '成果物を宣言する' % n)
                 continue
             for key, want in (s.get('artifacts') or {}).items():
                 rel = norm_key(key)

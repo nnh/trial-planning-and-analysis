@@ -80,18 +80,23 @@ def main() -> int:
     p.add_argument("--sap", help="統計解析計画書（text/markdown）")
     p.add_argument("--prt", help="研究計画書（text/markdown）")
     p.add_argument("--ecrf", help="電子症例報告書の構造定義 JSON")
+    p.add_argument("--metadata", help="機械可読な宣言の置き場（docs/metadata）")
+    p.add_argument("--acceptance", help="受入基準の置き場（docs/validation/acceptance）")
     p.add_argument("--severity", default="warning", choices=("info", "warning", "error"),
                    help="この深刻度以上だけ出す（既定 warning）")
     p.add_argument("--methods-dir",
                    help="枠組みの review/ の置き場（環境変数 TRIAL_REVIEW_DIR より優先）")
     a = p.parse_args()
 
-    if not (a.sap or a.prt or a.ecrf):
-        p.error("--sap・--prt・--ecrf のどれかを渡してください")
+    if not (a.sap or a.prt or a.ecrf or a.metadata):
+        p.error("--sap・--prt・--ecrf・--metadata のどれかを渡してください")
+    if bool(a.metadata) != bool(a.acceptance):
+        p.error("--metadata と --acceptance は両方渡してください")
 
     m = methods_dir(a.methods_dir)
     sap_audit = os.path.join(m, "planning-review", "audit_sap_structure.py")
     ecrf_audit = os.path.join(m, "ecrf-review", "audit_ecrf_json.py")
+    decl_audit = os.path.join(m, "planning-review", "audit_declarations.py")
     print(f"方法論の置き場: {m}")
 
     codes = []
@@ -101,6 +106,12 @@ def main() -> int:
         codes.append(run("研究計画書の構造（S01-S10）", sap_audit, [a.prt, "--severity", a.severity]))
     if a.ecrf:
         codes.append(run("電子症例報告書の構造定義（R01-R12）", ecrf_audit, [a.ecrf, "--severity", a.severity]))
+    if a.metadata:
+        args = ["--metadata", a.metadata, "--acceptance", a.acceptance,
+                "--severity", a.severity]
+        if a.sap:
+            args += ["--sap", a.sap]
+        codes.append(run("宣言と統計解析計画書の対応（D01-D07）", decl_audit, args))
 
     print("\n" + "=" * 60)
     print("機械検査はここまで。判断が要る項目はチェックリストが持つ。")

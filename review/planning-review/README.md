@@ -9,6 +9,7 @@
 - [checklist-tlf-shells.md](checklist-tlf-shells.md) — 図表案のレビュー
 - [findings-log.md](findings-log.md) — 過去に見つかった欠陥の型。次の試験で同じ箇所を見るための蓄積
 - [audit_sap_structure.py](audit_sap_structure.py) — 統計解析計画書の機械検査
+- [audit_declarations.py](audit_declarations.py) — 機械可読な宣言と統計解析計画書の対応の機械検査
 - [fixture.md](fixture.md) — 機械検査の回帰確認用の作り物。10規則すべてが発火する
 
 ## 位置づけ
@@ -55,6 +56,12 @@ python audit_sap_structure.py <統計解析計画書のテキストまたは mar
 規則は S01 から S10 の10。`--severity warning` で判断の要るものだけに絞れる。`--format tsv` で表計算に貼れる。`--rule S07` のように規則を指定して絞ることもできる。
 
 終了コードは3値で、0 が error なし、1 が error あり、2 が検査そのものが走らなかったことを表す。`--severity` は表示を絞るだけで、終了コードは絞る前の error の件数で決まる。2 を 0 と読まないこと。検査の不在と合格は別である。
+
+```
+python audit_declarations.py --metadata <docs/metadata> --acceptance <docs/validation/acceptance> [--sap <統計解析計画書>]
+```
+
+規則は D01 から D07 の7。文書の構造検査が本文しか見ず、実装の検査が宣言しか見ないため、その間に落ちる型を拾う。宣言がそろっていない、宣言に未定が残っている、宣言どうしの識別子が食い違う、宣言が根拠として挙げる節が統計解析計画書に無い、の4種である。分母を変えて宣言を旧版に残しても、どちらの検査にも掛からない。
 
 手を入れたら [fixture.md](fixture.md) にかけて、10規則すべてが発火することを確かめる。実文書（過去のレビュー結果・作成仕様の md 4本）では error 0件・warning は編集メモの検出が主で、誤検出は出ていない（2026-08-22 時点）。
 

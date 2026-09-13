@@ -299,7 +299,7 @@ ARS 仕様を ADaM 作成より前に置くのは、どの統計量をどの群�
 
 - 入口：研究計画書・SAP・図表案・eCRF の構造定義・受領 define.xml がそろい、同じ時点のものであること。
 - 人が決めること：[../review/sap-review/upfront-decisions.md](../review/sap-review/upfront-decisions.md) の 12 事項を一度に決め切る。決めた結果を SAP 本文と機械可読な宣言（集団の条件と期待例数、水準集合、評価時点の対応表、受入基準）に置く。研究責任医師とデータセンターへの照会はここで一括して出す。
-- 出口：宣言の CSV が全部そろい、SAP の節番号との対応表（仕様索引）に「未定」が残っていないこと。宣言と SAP の突合検査（[../skills/trial-planning-review/](../skills/trial-planning-review/SKILL.md)）が通ること。
+- 出口：宣言の CSV が全部そろい、SAP の節番号との対応表（仕様索引）に「未定」が残っていないこと。宣言と SAP の突合検査（[../skills/trial-planning-review/](../skills/trial-planning-review/SKILL.md) に `--metadata` と `--acceptance` を渡す。実体は [../review/planning-review/audit_declarations.py](../review/planning-review/audit_declarations.py)）が通ること。
 
 ### 7.2. 区間2 固定から突合まで
 

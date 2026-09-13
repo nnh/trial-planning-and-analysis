@@ -46,6 +46,7 @@ XPT は外部パッケージ（pyreadstat）が要るので、関数の中で読
 import argparse
 import collections
 import csv
+import hashlib
 import json
 import os
 import re
@@ -224,8 +225,11 @@ def domain_of(header, rows, path):
     return re.sub(r"[^A-Za-z0-9]", "", stem).upper()
 
 
-def load_dir(path, encoding):
+def load_dir(path, encoding, manifest=None):
     """ディレクトリ直下のデータを読む。読めなければ Unreadable を投げる。
+
+    manifest を渡したときは、そこに並んだファイルだけを読む。並んでいないファイルが
+    直下にあれば止める。写し損ないと宣言の陳腐化は、どちらも件数では分からない。
 
     既定で直下だけを見る。手順は受領カットを版別フォルダへ保管し、解析が使う版だけを
     直下へ置く。配下まで辿ると、保管した旧版の同じドメインも一緒に読み、解析が使う版と
@@ -233,6 +237,33 @@ def load_dir(path, encoding):
     """
     if not os.path.isdir(path):
         raise Unreadable("ディレクトリがない: %s" % path)
+
+    if manifest:
+        files = []
+        bad = []
+        for name, want in manifest:
+            full = os.path.join(path, name)
+            if not os.path.isfile(full):
+                bad.append("%s が無い" % name)
+                continue
+            if want:
+                got = sha256_of(full)
+                if got != want:
+                    bad.append("%s が宣言と違う（宣言 %s… / 実物 %s…）"
+                               % (name, want[:12], got[:12]))
+            files.append(full)
+        listed = {n for n, _ in manifest}
+        for n in sorted(os.listdir(path)):
+            ext = os.path.splitext(n)[1].lower()
+            if (os.path.isfile(os.path.join(path, n))
+                    and ext in (".csv", ".json", ".xpt") and n not in listed):
+                bad.append("%s は受領マニフェストに無い" % n)
+        if bad:
+            raise Unreadable(
+                "受領マニフェストと %s の中身が合わない:\n  %s"
+                % (path, "\n  ".join(bad)))
+        return read_files(files, encoding, path)
+
     files = []
     if RECURSIVE:
         for root, _dirs, names in os.walk(path):
@@ -258,6 +289,10 @@ def load_dir(path, encoding):
             "%s に CSV・Dataset-JSON・XPT がない。拡張子で探しているので、"
             "別の拡張子で置かれていないかを見る%s" % (path, hint))
 
+    return read_files(files, encoding, path)
+
+
+def read_files(files, encoding, path):
     datasets = []
     for p in sorted(files):
         ext = os.path.splitext(p)[1].lower()
@@ -273,6 +308,60 @@ def load_dir(path, encoding):
     if not datasets:
         raise Unreadable("%s から読めた表が 0 件だった" % path)
     return datasets
+
+
+def load_manifest(path):
+    """受領マニフェスト。現行の入力がどのファイルかを宣言で持つ。
+
+    直下だけを見る規則で旧版の混入は防げるが、写し損ないは防げない。同じ名前の
+    古いファイルが1つ残っても件数は合う。宣言に並べた集合と実在を突き合わせる。
+
+    列は file（直下からの相対名）と、任意で sha256。
+    """
+    rows = []
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        rdr = csv.DictReader(f)
+        if not rdr.fieldnames or "file" not in rdr.fieldnames:
+            raise Unreadable("受領マニフェストに file 列がない: %s" % path)
+        for r in rdr:
+            name = (r.get("file") or "").strip()
+            if name:
+                rows.append((name, (r.get("sha256") or "").strip().lower()))
+    if not rows:
+        raise Unreadable("受領マニフェストが空: %s" % path)
+    return rows
+
+
+def sha256_of(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def load_keys(path):
+    """突合のキーの宣言。列は domain と key（; 区切りの変数名）。
+
+    キーを実装の推測に任せると、ドメインごとに何で結んだかが結果から読めない。
+    宣言があれば、結べなかったことも宣言との差として出せる。
+    """
+    out = {}
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        rdr = csv.DictReader(f)
+        need = ("domain", "key")
+        if not rdr.fieldnames or any(c not in rdr.fieldnames for c in need):
+            raise Unreadable("キーの宣言に domain・key 列がない: %s" % path)
+        for r in rdr:
+            dom = (r.get("domain") or "").strip().upper()
+            key = [x.strip().upper()
+                   for x in (r.get("key") or "").replace(";", ",").split(",")
+                   if x.strip()]
+            if dom:
+                out[dom] = key
+    if not out:
+        raise Unreadable("キーの宣言が空: %s" % path)
+    return out
 
 
 def by_domain(datasets, path):
@@ -587,9 +676,10 @@ def is_decision(ds, var):
     return var[len(ds.domain):] in DECISION_SUFFIXES
 
 
-def run_diff(before, after, encoding, max_shown):
-    b = by_domain(load_dir(before, encoding), before)
-    a = by_domain(load_dir(after, encoding), after)
+def run_diff(before, after, encoding, max_shown,
+             man_before=None, man_after=None, keys=None):
+    b = by_domain(load_dir(before, encoding, man_before), before)
+    a = by_domain(load_dir(after, encoding, man_after), after)
     lines = []
     lines.append("固定前: %s（ドメイン %d・レコード %d）" %
                  (before, len(b), sum(len(d.rows) for d in b.values())))
@@ -615,8 +705,25 @@ def run_diff(before, after, encoding, max_shown):
         unverified.append("%s  固定前に無い。判定への影響は未評価" % dom)
     for dom in sorted(set(a) & set(b)):
         da, db = a[dom], b[dom]
-        key = diff_key(db)
-        key = [k for k in key if k in da.columns]
+        if keys is not None:
+            if dom not in keys:
+                lines.append("## %s  キーの宣言が無いので件数だけ出す"
+                             "（固定前 %d → 固定後 %d）" %
+                             (dom, len(db.rows), len(da.rows)))
+                unverified.append("%s  突合のキーが宣言されていない。行ごとの照合を"
+                                  "していない" % dom)
+                continue
+            key = list(keys[dom])
+            lack = [k for k in key if k not in db.columns or k not in da.columns]
+            if lack:
+                lines.append("## %s  宣言されたキーの変数が無い: %s" %
+                             (dom, "・".join(lack)))
+                unverified.append("%s  宣言されたキー %s がデータに無い。照合不能"
+                                  % (dom, "+".join(key)))
+                continue
+        else:
+            key = diff_key(db)
+            key = [k for k in key if k in da.columns]
         if not key:
             lines.append("## %s  突合のキーが決まらないので件数だけ出す"
                          "（固定前 %d → 固定後 %d）" %
@@ -706,8 +813,8 @@ def run_diff(before, after, encoding, max_shown):
 # ---------------------------------------------------------------- 出力
 
 
-def run_inventory(path, encoding, max_levels):
-    datasets = load_dir(path, encoding)
+def run_inventory(path, encoding, max_levels, manifest=None):
+    datasets = load_dir(path, encoding, manifest)
     lines = ["対象: %s（ドメイン %d・レコード %d・変数 %d）" %
              (path, len(datasets), sum(len(d.rows) for d in datasets),
               sum(len(d.columns) for d in datasets)), ""]
@@ -741,8 +848,8 @@ def run_inventory(path, encoding, max_levels):
     return lines
 
 
-def run_audit(path, encoding, expect_path, max_levels):
-    datasets = load_dir(path, encoding)
+def run_audit(path, encoding, expect_path, max_levels, manifest=None):
+    datasets = load_dir(path, encoding, manifest)
     expect = load_expect(expect_path) if expect_path else {}
 
     findings = []
@@ -776,6 +883,14 @@ def main():
                         "（受領仕様が末尾の欠落を許す場合だけ）")
     p.add_argument("--recursive", action="store_true",
                    help="ディレクトリの配下まで辿る（既定は直下だけ）")
+    p.add_argument("--manifest",
+                   help="受領マニフェスト（列 file・任意で sha256）。"
+                        "並んだファイルだけを読み、並んでいないものが直下にあれば止める")
+    p.add_argument("--manifest2",
+                   help="diff の固定後に当てる受領マニフェスト")
+    p.add_argument("--keys",
+                   help="突合のキーの宣言（列 domain・key）。"
+                        "宣言の無いドメインは照合せず未評価として残す")
     a = p.parse_args()
 
     global ALLOW_RAGGED, RECURSIVE
@@ -783,8 +898,12 @@ def main():
     RECURSIVE = a.recursive
 
     try:
+        man = load_manifest(a.manifest) if a.manifest else None
+        man2 = load_manifest(a.manifest2) if a.manifest2 else None
+        keys = load_keys(a.keys) if a.keys else None
+
         if a.mode == "inventory":
-            for line in run_inventory(a.path, a.encoding, a.max_levels):
+            for line in run_inventory(a.path, a.encoding, a.max_levels, man):
                 print(line)
             return 0
 
@@ -793,13 +912,13 @@ def main():
                 print("ERROR: diff には固定前と固定後の 2 つを渡す")
                 return 2
             lines, decided = run_diff(a.path, a.path2, a.encoding,
-                                      a.max_levels)
+                                      a.max_levels, man, man2, keys)
             for line in lines:
                 print(line)
             return 1 if decided else 0
 
         datasets, expect, findings = run_audit(
-            a.path, a.encoding, a.expect, a.max_levels)
+            a.path, a.encoding, a.expect, a.max_levels, man)
     except Unreadable as e:
         print("検証できなかった: %s" % e)
         return 2
