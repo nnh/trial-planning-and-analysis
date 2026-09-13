@@ -408,7 +408,7 @@ ADaM の定義文書が使うコードリスト。ADaM には受領した定義�
 
 ## 使い方
 
-1. 雛形をコピーする。受入基準の3本は `docs/validation/acceptance/`、残りは `docs/metadata/` へ置く。`timepoint-map.csv` は試験で使う名前に合わせてよい
+1. 雛形をコピーする。受入基準の3本は `docs/validation/acceptance/`、残りは `docs/metadata/` へ置く。名前は雛形のまま変えない。読み手（`tlf_ops.R`・`tlf_ops.sas`・検査スクリプト）が雛形の名前で探すので、試験ごとに変えると時点別の表示型が読み込みで止まる
 2. `trial.json` の2つの値を埋める
 3. 区間1で決め切る事項を受入基準へ落とす。`analysis-set-condition.csv` に集団の条件と期待例数、`primary-endpoint.csv` に主要評価項目の判定、`display-contract.csv` に図表ごとの期待を書く。3本とも実装を見ずに一次文書から起こす。この3本を先にするのは、後の工程がここを基準に照合するためで、実装ができてから書くと基準が実装の写しになる
 4. 図表案が固まったら `tlf-index.csv` と `label-catalog.csv` を書き起こし、事前規定の水準を `level-sets.csv` へ、結果を分ける軸を `analysis-grouping.csv` へ宣言する。図表案のレビュー（[../review/planning-review/checklist-tlf-shells.md](../review/planning-review/checklist-tlf-shells.md)）を通してから書くと、後から並び順や分母で戻らない

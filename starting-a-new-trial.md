@@ -34,6 +34,14 @@ TRIAL=<新しい試験のリポジトリのパス>
 
 ### 4.1. リポジトリの骨格
 
+最初に、この端末で何が回せるかを見る。依存の不足はデータを作り始める前にまとめて出す。回せない工程があることは、後の段で1つずつ突き当たるより、着手の前に分かっている方がよい。
+
+```bash
+python3 "$FRAMEWORK"/pipeline/scripts/python/check-environment.py
+```
+
+必須（python3・git・R・スキル2つ・枠組みの `review/`）が欠けていれば終了コード1で、そろっていれば0を返す。SAS と CDISC CORE は端末によって無いことがあり、その場合は回せない工程を挙げる。回せない工程を別端末で回すなら、どちらの端末で何を回すかを試験側の `CLAUDE.md` に書く。置き場が既定と違うものは環境変数で指す（`SAS_HOME`・`CDISC_CORE_EXE`・`CDISC_DEFINE_XML_SKILL`・`TRIAL_REVIEW_DIR`）。
+
 統計解析責任者が、試験ごとに1つのリポジトリを作る。ディレクトリの形と、そう分ける理由は [pipeline/analysis-pipeline-plan.md](pipeline/analysis-pipeline-plan.md)「リポジトリ側の構成」が持つ。下のコマンドはその形を作るだけで、意図はそこを読む。
 
 ```bash
@@ -111,8 +119,13 @@ cd "$TRIAL" && python3 -c "import sys; sys.path.insert(0, 'scripts'); import box
 統計解析責任者が、集めた資料に立案時レビューを当てる。回す順序・機械検査・指摘の形は [skills/trial-planning-review/](skills/trial-planning-review/SKILL.md) が持ち、判断が要る項目の規則は [review/](review/README.md) の各チェックリストが持つ。
 
 ```bash
+mkdir -p ~/.claude/skills
 cp -r "$FRAMEWORK"/skills/trial-planning-review ~/.claude/skills/
+cp -r "$FRAMEWORK"/skills/cdisc-define-xml ~/.claude/skills/
+export TRIAL_REVIEW_DIR="$FRAMEWORK/review"
 ```
+
+写すスキルは2つある。`trial-planning-review` はこの段で使い、`cdisc-define-xml` は後の ADaM の define.xml の生成が読む。立案の段で片方だけ写すと、不足が分かるのは解析に入ってからになる。`TRIAL_REVIEW_DIR` は実行器が方法論を探す場所で、指定が無いときはホーム配下の決め打ちの候補を順に見る。枠組みをそこに置いていない端末では、この変数か `--methods-dir` が無いと検査が1件も回らない。
 
 対象ごとの実施の時期は [review/README.md](review/README.md)「実施の時期」が持つ。研究計画書は倫理審査へ出す前、電子症例報告書は EDC 固定の前、統計解析計画書と図表案は固定の前である。この時期を逃すと以降は改訂手続きになるので、4.1. から 4.4. の完了を待たずに資料の依頼を出す。
 

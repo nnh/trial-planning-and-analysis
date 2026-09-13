@@ -1035,14 +1035,14 @@ d_tab_prop_grp_multi <- function(r) {
        keys = keys, note = build_note("", r))
 }
 
-## 評価時点を行に持つ表（SAS の %tab_prop_tp）。行の並びと表示名は docs/metadata/mr-timepoint.csv。
+## 評価時点を行に持つ表（SAS の %tab_prop_tp）。行の並びと表示名は docs/metadata/timepoint-map.csv。
 ## SAS 側も %_tdmr_load が同じ CSV を読む（宣言はデータセット名を持たない）。
 ## 宣言の subset= で渡した部分集合の解析がある水準は、割合ではなくその件数をカッコに入れる。
 d_tab_prop_tp <- function(r) {
   d <- ARD[ARD$output_id == r$output_id & ARD$context == "categorical", ]
   if (!nrow(d)) return(NULL)
   ls <- lvsplit(r$levels)
-  tp <- read_csv(ap_spec("mr-timepoint.csv"), col_types = cols(.default = "c"),
+  tp <- read_csv(ap_spec("timepoint-map.csv"), col_types = cols(.default = "c"),
                  progress = FALSE, na = character())
   tp <- tp[order(suppressWarnings(as.numeric(tp$order))), ]
   ## 件数をカッコに入れる部分集合の名前は宣言の subset= が持つ。試験ごとに違うので
@@ -1072,7 +1072,7 @@ d_tab_prop_tp <- function(r) {
     else ky(x$analysis_id[1], lv, gr, "n",
             shown(n = f0(stat_of(x, "n")), p = f1(stat_of(x, "p"))))
   }
-  ## 行の表示名は mr-timepoint.csv の label。日英の表示を与えたい時点だけ label-catalog に
+  ## 行の表示名は timepoint-map.csv の label。日英の表示を与えたい時点だけ label-catalog に
   ## kind=level で <群の識別子>_<図表ID> を登録し、そちらを先に引く（lvl_for と同じ形）。
   ## SAP の列見出しが内部識別子のままだった adjuvant_cmr・molpd・molr・relapse が該当する
   ## （C2-217。SAS の %tab_prop_tp も同じ引き当てをする）

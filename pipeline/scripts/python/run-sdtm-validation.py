@@ -14,7 +14,8 @@
 #
 # 前提：R 系の Dataset-JSON が Box の datasets/r/sdtm/json に出来ていること
 #       （program/r/<試験ID>_CSVtoSDTM.R を先に実行する）
-#       CDISC CORE が %USERPROFILE%\opt\cdisc-core\core に入っていること
+#       CDISC CORE が入っていること（既定はホーム配下の opt/cdisc-core/core。
+#       別の場所なら CDISC_CORE_EXE で指定する。端末ごとの可否は check-environment.py）
 #       方法論の正本は akiko-office docs/methods/sdtm-conformance-validation.md
 #
 # 使い方：python scripts/run-sdtm-validation.py
@@ -63,11 +64,26 @@ def main():
 
     repo = runcommon.REPO
     box = runcommon.trial_root()
-    core = os.path.join(os.environ.get('USERPROFILE', ''),
-                        'opt', 'cdisc-core', 'core', 'core.exe')
+    # 置き場は環境変数で変えられる。USERPROFILE を直に組み立てると、その変数を持たない
+    # 端末では空文字と結合した相対パスになり、「無い」ではなく「見当違いの場所を見た」で
+    # 落ちる。既定は導入手順が置く場所（build-adam-define.py と同じ作法）
+    home = os.environ.get('USERPROFILE') or os.path.expanduser('~')
+    core = os.environ.get('CDISC_CORE_EXE') or os.path.join(
+        home, 'opt', 'cdisc-core', 'core', 'core.exe')
     stamp = time.strftime('%Y%m%d')
-    skills = os.path.join(os.environ.get('USERPROFILE', ''), '.claude', 'skills',
-                          'cdisc-define-xml', 'scripts')
+    skill = os.environ.get('CDISC_DEFINE_XML_SKILL') or os.path.join(
+        home, '.claude', 'skills', 'cdisc-define-xml')
+    skills = os.path.join(skill, 'scripts')
+    if not os.path.isfile(core):
+        print('CDISC CORE の実行ファイルがありません: %s' % core)
+        print('  CDISC_CORE_EXE で場所を指定できます。'
+              'この端末に無いなら、SDTM の適合性検証は別端末で回します。')
+        print('  端末ごとの可否は pipeline/scripts/python/check-environment.py で見ます。')
+        return 2
+    if not os.path.isdir(skills):
+        print('cdisc-define-xml スキルがありません: %s' % skills)
+        print('  CDISC_DEFINE_XML_SKILL で場所を指定できます。')
+        return 2
 
     # CORE の結果の置き場。既定は invoke_sas と同じ試験フォルダの log で、--root で出力先を
     # 隔離したときもログだけ本番へ落ちないように trial_root() を通す（runcommon.py）。

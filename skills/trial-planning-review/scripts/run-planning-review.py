@@ -29,21 +29,33 @@ for _s in (sys.stdout, sys.stderr):
         pass
 
 
-def methods_dir():
+def methods_dir(explicit=None):
+    """枠組みの review/ を探す。
+
+    決め打ちの候補だけに頼らない。枠組みの作業コピーを置く場所は端末ごとに違い、
+    候補に無い場所へ clone してあると、立案時レビューが1件も回らないまま止まる。
+    優先順位は、引数で渡された場所、環境変数、ホーム配下の候補の順。
+    """
     cands = []
+    if explicit:
+        cands.append(explicit)
     env = os.environ.get("TRIAL_REVIEW_DIR")
     if env:
         cands.append(env)
     home = os.path.expanduser("~")
-    cands.append(os.path.join(home, "Projects", "nnh", "trial-planning-and-analysis", "review"))
-    cands.append(os.path.join(home, "trial-planning-and-analysis", "review"))
+    for parent in (os.path.join(home, "Projects", "nnh"),
+                   os.path.join(home, "Projects", "stat"),
+                   os.path.join(home, "Projects"),
+                   home):
+        cands.append(os.path.join(parent, "trial-planning-and-analysis", "review"))
     for c in cands:
         if os.path.isdir(os.path.join(c, "planning-review")):
             return c
     raise SystemExit("\n".join([
         "review/ の置き場が見つかりません。次を探しました:",
         *["  " + c for c in cands],
-        "TRIAL_REVIEW_DIR で場所を指定するか、nnh/trial-planning-and-analysis を clone してください。",
+        "--methods-dir <枠組み>/review か TRIAL_REVIEW_DIR で場所を指定してください。",
+        "どちらも設定していない端末では、この検査は1件も回りません。件数を0と読まないこと。",
     ]))
 
 
@@ -70,12 +82,14 @@ def main() -> int:
     p.add_argument("--ecrf", help="電子症例報告書の構造定義 JSON")
     p.add_argument("--severity", default="warning", choices=("info", "warning", "error"),
                    help="この深刻度以上だけ出す（既定 warning）")
+    p.add_argument("--methods-dir",
+                   help="枠組みの review/ の置き場（環境変数 TRIAL_REVIEW_DIR より優先）")
     a = p.parse_args()
 
     if not (a.sap or a.prt or a.ecrf):
         p.error("--sap・--prt・--ecrf のどれかを渡してください")
 
-    m = methods_dir()
+    m = methods_dir(a.methods_dir)
     sap_audit = os.path.join(m, "planning-review", "audit_sap_structure.py")
     ecrf_audit = os.path.join(m, "ecrf-review", "audit_ecrf_json.py")
     print(f"方法論の置き場: {m}")

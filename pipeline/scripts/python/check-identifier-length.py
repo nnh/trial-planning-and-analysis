@@ -55,7 +55,7 @@ SOURCES = {
         ('docs/validation/acceptance/analysis-set-condition.csv', 'id', False,
          lambda r: r.get('kind') == 'dataSubset'),
         ('docs/validation/acceptance/display-contract.csv', 'data_subset', True, None),
-        ('docs/metadata/mr-timepoint.csv', 'subset', False, None),
+        ('docs/metadata/timepoint-map.csv', 'subset', False, None),
         ('docs/metadata/tlf-index.csv', 'subset', False, None),
     ],
     'OUTPUTID': [
