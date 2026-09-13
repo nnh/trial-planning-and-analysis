@@ -99,25 +99,46 @@ def trial_root():
     return boxpath.trial_dir()
 
 
+def r_version_key(name):
+    """R-4.10.0 のような導入先の名前を版の組に直す。文字列順では 4.9 が 4.10 の後に来る。"""
+    m = re.match(r'R-(\d+)(?:\.(\d+))?(?:\.(\d+))?', name)
+    return tuple(int(x) for x in m.groups(default='0')) if m else (0, 0, 0)
+
+
 def find_rscript():
-    """Rscript の在処。端末ごとの導入先は akiko-office の docs/r-environment.md が正本で、
-    ここでは既定の場所と PATH の両方を見る。R は 4.6.1（renv.lock が版を固定する）。
+    """Rscript の在処。端末ごとの導入の作法は setting-up-a-machine.md が持つ。
+
+    版をここに書かない。書くと renv.lock と2箇所で持つことになり、R を上げた日に
+    黙って見つからなくなる。複数の版が入っている端末では新しい方を採るので、
+    renv.lock が固定する版と食い違うときは renv が復元のときに知らせる。
+
+    導入先を先に見て PATH を後に見る。Windows で R の版を管理する道具（rig）は
+    PATH に Rscript.BAT という shim を置くが、Windows の CreateProcess は
+    バッチファイルを起動できず、subprocess へ渡すと FileNotFoundError になる
+    （2026-09-14 に実行機で実測）。実体の .exe が在るならそれを直に呼ぶ。
 
     既定の場所が2つあるのは、導入の scope で行き先が変わるためである。利用者ごとに入れると
     %LOCALAPPDATA%\\Programs\\R、機械に入れると %ProgramFiles%\\R に置かれる。片方しか見ないと、
     もう片方で入れた端末では PATH に通っていない限り見つからない。
     """
-    cands = [os.path.join(os.environ.get('LOCALAPPDATA', ''),
-                          'Programs', 'R', 'R-4.6.1', 'bin', 'Rscript.exe'),
-             os.path.join(os.environ.get('ProgramFiles', r'C:\Program Files'),
-                          'R', 'R-4.6.1', 'bin', 'Rscript.exe')]
-    for p in cands:
-        if os.path.isfile(p):
-            return p
+    roots = [os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs', 'R'),
+             os.path.join(os.environ.get('ProgramFiles', r'C:\Program Files'), 'R')]
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+        for name in sorted(os.listdir(root), key=r_version_key, reverse=True):
+            exe = os.path.join(root, name, 'bin', 'Rscript.exe')
+            if os.path.isfile(exe):
+                return exe
     found = shutil.which('Rscript')
-    if found:
+    if found and not found.lower().endswith(('.bat', '.cmd')):
         return found
-    raise SystemExit('Rscript が見つかりません: %s' % ' / '.join(cands))
+    if found:
+        raise SystemExit(
+            'PATH の Rscript はバッチの shim なので subprocess から起動できません: %s\n'
+            '実体の Rscript.exe を持つ導入先が %s に見つかりませんでした。'
+            % (found, ' / '.join(roots)))
+    raise SystemExit('Rscript が見つかりません: %s' % ' / '.join(roots))
 
 
 def log_encoding(encoding):

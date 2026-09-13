@@ -77,9 +77,31 @@ def chromium_dir():
     return None
 
 
+def spawn_args(cmd):
+    """外部コマンドの引数を、この OS が起動できる形に直す。
+
+    Windows の CreateProcess はバッチファイルを起動できない。R の版を管理する
+    道具（rig）は Rscript.BAT という shim を PATH へ置くので、そのまま渡すと
+    FileNotFoundError になる。version() はそれを握り潰して None を返すため、
+    R が動きソースからのビルドも通る端末で「R のビルド道具が無い」と報告された
+    （2026-09-14、実行機で実測）。
+
+    cmd.exe を挟む経路では、引数にダブルクォートを使わない。cmd が引用符を
+    再解釈し、空白を含むパスが別のコマンドとして読まれる（同日、
+    cat(Sys.which("make")) が「'C:\\Program' は認識されていません」で落ちた）。
+    R へ渡す文字列はシングルクォートで書くこと。
+    """
+    exe = shutil.which(cmd[0]) or cmd[0]
+    if os.name == 'nt' and exe.lower().endswith(('.bat', '.cmd')):
+        return [os.environ.get('COMSPEC', 'cmd.exe'), '/c', exe] + list(cmd[1:])
+    return [exe] + list(cmd[1:])
+
+
 def version(cmd):
+    """先頭行を返す。起動できなかったときだけ None を返す（空文字と区別する）。"""
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        p = subprocess.run(spawn_args(cmd), capture_output=True, text=True,
+                           timeout=30)
     except (OSError, subprocess.SubprocessError):
         return None
     out = (p.stdout or '') + (p.stderr or '')
@@ -108,17 +130,31 @@ def main():
           '版を固定できず、再現の確認ができない')
 
     r = which('Rscript')
-    check(rows, True, 'R（Rscript）', bool(r), version(['Rscript', '--version']) or r or '',
+    if r:
+        rver = version(['Rscript', '--version'])
+        rdetail = rver if rver else ('%s（版を取得できなかった）' % r)
+    else:
+        rdetail = ''
+    check(rows, True, 'R（Rscript）', bool(r), rdetail,
           'R 系の生成が回せない。二重コーディングの片系統が作れない')
 
     # R から make が見えるか。CRAN に版に対応するバイナリが無いパッケージは
     # ソースからのビルドになるので、これが無いと renv の復元が途中で止まる。
     # Windows は Rtools、macOS は Xcode のコマンドラインツールが make を持つ。
     # 見ているのは「R から make が見えるか」だけで、ビルドが通ることまでは確かめていない。
-    make = version(['Rscript', '-e', 'cat(Sys.which("make"))']) if r else None
-    check(rows, False, 'R のビルド道具（make）', bool(make),
-          make or ('Rtools（Windows）・xcode-select --install（macOS）' if r
-                   else 'R が無いので確かめていない'),
+    # 起動できなかったことを「無し」と混ぜない。混ぜると、入っているものを
+    # 入っていないと報告する。
+    if not r:
+        make, make_detail = None, 'R が無いので確かめていない'
+    else:
+        make = version(['Rscript', '-e', "cat(Sys.which('make'))"])
+        if make is None:
+            make_detail = '%s を起動できなかった' % r
+        elif make:
+            make_detail = make
+        else:
+            make_detail = 'Rtools（Windows）・xcode-select --install（macOS）'
+    check(rows, False, 'R のビルド道具（make）', bool(make), make_detail,
           'CRAN にバイナリが無いパッケージをソースからビルドできない。'
           'renv の復元が途中で止まる')
 
