@@ -1266,7 +1266,7 @@ catx('', strip(&aid), '|', strip(&vl), '|', strip(&g1), '|', strip(&st), '|',
   1.2c 評価時点を行に持つカテゴリ表（1つの OUTPUTID の解析を行として並べる。SAP 5.4.3.1）
   SAP の図表案は評価時点を列に置くが、23列は A4 縦の本文幅（11,185 twips）に入らない
   （n (%) のセルで約22,800 twips 必要）。行と列を入れ替えて1表にする。内容は同じ。
-  行の並びと表示名は docs/metadata/mr-timepoint.csv（%_tdmr_load）が持ち、列の並びは levels= で決める。
+  行の並びと表示名は docs/metadata/timepoint-map.csv（%_tdmr_load）が持ち、列の並びは levels= で決める。
   宣言の subset= で渡した部分集合の解析がある水準は、割合ではなくその件数をカッコに入れる。
   部分集合の名前は試験ごとに違うので、表示型に直書きせず宣言から受ける（2026-08-29）
   （molpd・molr は88例の排他区分ではなくイベントの件数なので割合を出さない）。
@@ -1290,7 +1290,7 @@ catx('', strip(&aid), '|', strip(&vl), '|', strip(&g1), '|', strip(&st), '|',
     length ROWKEY $40 ROWLBL $200 _LK $80;
     ROWKEY = strip(glabel);
     ROWLBL = strip(label);
-    /* 行の表示名は mr-timepoint.csv の label。日英の表示を与えたい時点だけ label-catalog に
+    /* 行の表示名は timepoint-map.csv の label。日英の表示を与えたい時点だけ label-catalog に
        kind=level で <群の識別子>_<図表ID> を登録し、そちらを先に引く。SAP の列見出しが
        内部識別子のままだった adjuvant_cmr・molpd・molr・relapse が該当する
        （C2-217。R 側は d_tab_prop_tp の tplab() が同じ引き当てをする）*/
@@ -2211,18 +2211,18 @@ catx('', strip(&aid), '|', strip(&vl), '|', strip(&g1), '|', strip(&st), '|',
   なるため。表示型が表番号から前処理を引く（R系の d_tab_list も同じ形）。
 ========================================================================================*/
 
-/* 分子遺伝学的効果の23評価時点。正本は docs/metadata/mr-timepoint.csv（ARD.sas 第11章と同じ表）。
+/* 分子遺伝学的効果の23評価時点。正本は docs/metadata/timepoint-map.csv（ARD.sas 第11章と同じ表）。
    表 5.4.3.1（%tab_prop_tp）が行の並びと表示名に、表 5.4.3.2（%tab_mrlist）が列の並びと
    列見出しに使う。2度目以降は読み直さない */
 %macro _tdmr_load;
   %if not %sysfunc(exist(work._tdmr)) %then %do;
-    filename _mrcsv "&repo_root/docs/metadata/mr-timepoint.csv" encoding='utf-8';
+    filename _mrcsv "&repo_root/docs/metadata/timepoint-map.csv" encoding='utf-8';
     proc import out=work._tdmr datafile=_mrcsv dbms=csv replace;
       getnames=yes;
       guessingrows=max;
     run;
     filename _mrcsv clear;
-    %put NOTE: [TLF] 評価時点を読んだ: docs/metadata/mr-timepoint.csv;
+    %put NOTE: [TLF] 評価時点を読んだ: docs/metadata/timepoint-map.csv;
   %end;
 %mend _tdmr_load;
 

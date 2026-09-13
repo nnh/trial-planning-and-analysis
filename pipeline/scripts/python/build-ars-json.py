@@ -178,11 +178,15 @@ def read_method_code(system):
     return {r['method_id']: r for r in read_csv(p) if r.get('system') == system}
 
 
-def grouping_obj(gid, grp):
+def grouping_obj(gid, grp, lvlabels):
     """GroupingFactor を1件組む。定義は docs/metadata/analysis-grouping.csv が持つ（C2-142）
 
     定義の無い因子は build が先に落とす。ここで「分からないからデータ由来」と既定へ
     落とすと、事前規定の群が黙ってデータ由来を名乗って出ていく（C3-001）。
+
+    表示名は label-catalog.csv（kind=level）から引く。宣言の CSV にも表示名の列を置くと
+    同じ文言が2か所になり、片方だけ改訂したときに図表と解析メタデータが違う名前を述べる。
+    水準集合（levelset_obj）も同じ台を引いており、群と水準で引き方を変えない。
     """
     g = grp[gid]
     o = {'id': gid, 'name': gid, 'dataDriven': g['data_driven']}
@@ -192,7 +196,7 @@ def grouping_obj(gid, grp):
         o['groupingVariable'] = g['variable']
     if not g['data_driven'] and g['groups']:
         o['groups'] = [{'id': r['group_id'], 'name': r['group_id'],
-                        'label': r['label'] or r['group_id'],
+                        'label': lvlabels.get(r['group_id'], r['group_id']),
                         'level': 1, 'order': int(r['order'])} for r in g['groups']]
     return o
 
@@ -603,7 +607,8 @@ def build(cards, titles, purposes, tlf, cond=None, refdocs=None, mcode=None,
         # groupingDataset は他の因子が ADaM の名前を大文字で置くのに合わせて ARD と書く
         # （上の Analysis.dataset が ard.ard を ARD へ写すのと同じ書式）。変数名は
         # ard_cards.csv の列名そのままで、ADaM 変数のような大文字ではない
-        'analysisGroupings': [grouping_obj(g, grp) for g in sorted(groupings)]
+        'analysisGroupings': [grouping_obj(g, grp, lvlabels or {})
+                              for g in sorted(groupings)]
                              + [levelset_obj(s, lsets[s], lvlabels or {})
                                 for s in sorted(used_ls)]
                              + ([{'id': 'VARIABLE-LEVEL', 'name': 'VARIABLE-LEVEL',

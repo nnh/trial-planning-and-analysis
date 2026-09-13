@@ -7,14 +7,19 @@
 # 不一致0という事実は、その時点で人が回した記録にとどまり、現行のコードに対する条件では
 # なかった（docs/validation/records/codex-review-2-ledger.md の C2-009・C2-198・C2-097）。
 #
-# 段階は次のとおり。前の段階が落ちたら後ろは回さない。
-#   1. SAS 系の生成（run-all-sas.py。中で QC のゲートが働く）
-#   2. R 系の生成（SDTM → ADaM → ARD → 図表）
-#   3. ADaM の define（宣言と実データの照合・define.xml・define.html）
-#   4. トレーサビリティ索引（仕様書 HTML → 作業用の索引 → ブラウザでの確認）
-#   5. 層ごとの突合（SDTM・ADaM・ARD と主要評価項目の判定・図表のセル台帳）
-#   6. ARS の生成・スキーマ検証・両系統の突合・成果物との照合
-#   7. 成果物の検査（宣言と題名・視覚回帰）
+# 段階は次のとおり。前の段階が落ちたら後ろは回さない。区間2（固定から突合まで）の
+# 工程をすべて置く。以前は固定データの検証・SDTM の適合性検証・納品パッケージが
+# この計画の外にあり、「全段階が通りました」が区間の完了を意味していなかった。
+#   1. 固定データの検証（受領物の走査・宣言との照合。何も書き出さない）
+#   2. SAS 系の生成（run-all-sas.py。中で QC のゲートが働く）
+#   3. R 系の生成（SDTM → ADaM → ARD → 図表）
+#   4. SDTM の define の更新と CDISC CORE による適合性検証
+#   5. ADaM の define（宣言と実データの照合・define.xml・define.html）
+#   6. トレーサビリティ索引（仕様書 HTML → 作業用の索引 → ブラウザでの確認）
+#   7. 層ごとの突合（SDTM・ADaM・ARD と主要評価項目の判定・図表のセル台帳）
+#   8. ARS の生成・スキーマ検証・両系統の突合・成果物との照合
+#   9. 成果物の検査（宣言と題名・視覚回帰）
+#  10. 納品パッケージの組み立てと検査
 #
 # 段階3を段階2の直後に置くのは、ADaM の define.xml が読むもののうち回ごとに変わる唯一の
 # 材料が ADaM の Dataset-JSON（段階2の出力）だからである。残りの材料（variable-map.csv・
@@ -30,17 +35,32 @@
 # 作り直していたため、同じ名前の索引が納品パッケージの中と作業用の二箇所にあって、作業用だけが古い状態に
 # なっていた。仕様書 HTML を先に回すのは、索引がその節の id を読んで実在する節だけへリンクを出すためである。
 #
-# SDTM の define と CDISC CORE は run-sdtm-validation.py が持ち、ここには入れていない。
 #
 # 使い方
 #   python scripts/run-release.py              ... 全段階
-#   python scripts/run-release.py --from 3     ... 3段階目から（前の生成物を使う）
-#   python scripts/run-release.py --skip-sas   ... SAS 系の生成を飛ばす
+#   python scripts/run-release.py --from 4     ... 4段階目から（前の生成物を使う）
+#   python scripts/run-release.py --skip 2     ... その段を飛ばす（端末に処理系が無いとき）
+#
+# 飛ばした段は「飛ばした」として記録し、通ったものとして数えない。SAS も CDISC CORE も
+# 端末によっては入っていない。入っていないことを黙って合格にすると、その端末で回した
+# 記録が区間の完了を名乗る。飛ばしたときは最後にその旨を出し、全段階が通ったとは言わない。
 #
 # --from と --skip-sas は前の回の生成物を使うので、その回が今のコードと同じ版で、成果物が
 # その後書き換わっていないことを先に確かめる。確かめずに使うと、別々の回に作った層を
 # 混ぜたまま突合が「不一致0」で通る（C3-127）。段階ごとの記録は Box の
 # output/qc/release-manifest.json に置く（成果物と同じで git 管理外）。
+#
+# 確かめるのはコミットと成果物のハッシュだけではない。受領データ直下の指紋、宣言
+# （docs/metadata・docs/validation/acceptance の CSV）の指紋、環境の版も記録し、前の回と
+# 違えば再利用させない。コミットが同じままでも受領データは差し替わり（再抽出）、宣言は
+# 直され、処理系は入れ替わる。どれも成果物の意味を変えるが、コミットには現れない。
+# また、ある段階を回し直したら、それより後の段階の成功記録は捨てる。残すと、途中で
+# 落ちた回でも以前の後続段階が「同じ回に通った」ものとして再利用される。
+#
+# 段ごとの成果物のうち、枠組みが名前を知っているのは段階1・2・3・4・6 である。突合と
+# 視覚回帰の出力は試験側のプログラムが決めるので名指しできない。試験側が
+# docs/metadata/release-artifacts.csv に宣言する。宣言の無い段を飛ばそうとすると、
+# 実施した記録だけでは同じ回のものだと確かめられないので落とす。
 #
 # 終了コード 0 全段階が通った / 1 どこかで落ちた
 import argparse
@@ -79,21 +99,127 @@ def now():
 # 段階が作る成果物のうち、後ろの段階が材料として読むもの。ここが前の回と入れ替わって
 # いると、層をまたぐ突合が別々の回の材料を比べることになる。段階3以降は後続が読む
 # 材料を作らないので、記録するのは実施したことだけにする
+# パスは要素で持つ。区切りを文字列に書くと、書いた側の処理系でしか解決しない
+# （macOS ではバックスラッシュがファイル名の一部になり、成果物を見つけられない）。
+# 記録の鍵は / で綴り、読むときに区切りを揃える。
 STEP_ARTIFACTS = {
-    1: [r'datasets\sas\ard\ard_cards.csv',
-        r'output\compare\tlf_cells_sas_ja.csv', r'output\compare\tlf_cells_sas_en.csv'],
-    2: [r'datasets\r\ard\ard_cards_r.csv',
-        r'output\compare\tlf_cells_r_ja.csv', r'output\compare\tlf_cells_r_en.csv',
-        r'output\compare\tlf_cells_rsas_ja.csv', r'output\compare\tlf_cells_rsas_en.csv'],
+    2: [('datasets', 'sas', 'ard', 'ard_cards.csv'),
+        ('output', 'compare', 'tlf_cells_sas_ja.csv'),
+        ('output', 'compare', 'tlf_cells_sas_en.csv')],
+    3: [('datasets', 'r', 'ard', 'ard_cards_r.csv'),
+        ('output', 'compare', 'tlf_cells_r_ja.csv'),
+        ('output', 'compare', 'tlf_cells_r_en.csv'),
+        ('output', 'compare', 'tlf_cells_rsas_ja.csv'),
+        ('output', 'compare', 'tlf_cells_rsas_en.csv')],
+    4: [('datasets', 'define', 'sdtm', 'define.xml')],
+    5: [('datasets', 'define', 'adam', 'define.xml')],
+    6: [('output', 'tlf', 'traceability.html')],
+    8: [('datasets', 'sas', 'ard', 'reporting-event-sas.json'),
+        ('datasets', 'r', 'ard', 'reporting-event-r.json')],
 }
+
+# 何も書き出さない段。結論は入力から決まるので、入力の指紋が同じなら再現する。
+# 成果物が無いことと、成果物を記録し損ねたことを区別するために明示する。
+# 10（納品パッケージ）はパッケージ名に日付が入るので名指ししない。最後の段なので
+# 再利用の対象にならない。
+VERIFY_ONLY = (1, 7, 9, 10)
+
+# 枠組みが名前を知らない成果物は試験側が宣言する。突合と視覚回帰の出力は試験側の
+# プログラムが決めるので、ここで名指しできない。宣言が無い段は、実施の記録だけで
+# 再利用されることになるため、飛ばす対象になったときに落とす。
+DECLARED_ARTIFACTS = ('docs', 'metadata', 'release-artifacts.csv')
+
+# 宣言の指紋に入れる置き場。回ごとに変わらないが、版が変われば成果物の意味が変わる
+DECL_DIRS = (('docs', 'metadata'), ('docs', 'validation', 'acceptance'))
+
+# 受領データの置き場。解析が読むのは直下だけ（data-verification.md 4.9）
+INPUT_PARTS = ('input', 'rawdata')
+
+
+def rel_key(parts):
+    """記録の鍵。処理系によらず / で綴る。"""
+    return '/'.join(parts)
+
+
+def norm_key(key):
+    """記録から読んだ鍵の区切りを揃える。旧い記録は \\ で綴られている。"""
+    return key.replace(chr(92), '/')
+
+
+def declared_artifacts(repo):
+    """試験側が宣言した段ごとの成果物。無ければ空。"""
+    p = os.path.join(repo, *DECLARED_ARTIFACTS)
+    out = {}
+    if not os.path.isfile(p):
+        return out
+    import csv
+    with open(p, encoding='utf-8-sig', newline='') as f:
+        rdr = csv.DictReader(f)
+        if not rdr.fieldnames or 'step' not in rdr.fieldnames or 'path' not in rdr.fieldnames:
+            return out
+        for r in rdr:
+            s = (r.get('step') or '').strip()
+            path = (r.get('path') or '').strip().replace(chr(92), '/')
+            if s.isdigit() and path:
+                out.setdefault(int(s), []).append(tuple(path.split('/')))
+    return out
+
+
+def decl_digest(repo):
+    """宣言の指紋。宣言が変われば、同じコミットでも成果物の意味が変わる。"""
+    h = hashlib.sha256()
+    for parts in DECL_DIRS:
+        d = os.path.join(repo, *parts)
+        if not os.path.isdir(d):
+            continue
+        for n in sorted(os.listdir(d)):
+            f = os.path.join(d, n)
+            if os.path.isfile(f) and n.lower().endswith('.csv'):
+                h.update(n.encode('utf-8'))
+                h.update(sha256(f).encode('ascii'))
+    return h.hexdigest()
+
+
+def env_id():
+    """環境の版。処理系が変われば数値の再現は別の話になる。"""
+    import platform
+    return '%s %s / %s %s' % (platform.python_implementation(),
+                              platform.python_version(),
+                              platform.system(), platform.machine())
+
+
+def input_digest(box):
+    """受領データ直下の指紋。名前とハッシュを並べて1つにまとめる。
+
+    これを持たないと、同じコミットのまま受領データを差し替えても、記録した成果物さえ
+    据え置けば再開の検査が通る。層の材料が入れ替わったことに気づけない。
+    """
+    d = os.path.join(box, *INPUT_PARTS)
+    if not os.path.isdir(d):
+        return ''
+    h = hashlib.sha256()
+    for n in sorted(os.listdir(d)):
+        f = os.path.join(d, n)
+        if os.path.isfile(f):
+            h.update(n.encode('utf-8'))
+            h.update(sha256(f).encode('ascii'))
+    return h.hexdigest()
 
 
 class Release:
-    def __init__(self, box, commit, dirty):
+    def __init__(self, box, commit, dirty, repo=None, run_id=None):
         self.box = box
         self.commit = commit
         self.dirty = dirty
+        self.repo = repo or REPO
+        # 実行IDは1回の通しを通して同じ。段ごとの記録が同じ回のものかを、時刻でなく
+        # この値で見る。時刻は近ければ同じ回に見えるが、近いことは同じ回の証拠にならない
+        self.run_id = run_id or time.strftime('%Y%m%dT%H%M%S')
         self.manifest = os.path.join(box, 'output', 'qc', 'release-manifest.json')
+
+    def artifacts_for(self, no):
+        return list(STEP_ARTIFACTS.get(no, [])) + list(
+            declared_artifacts(self.repo).get(no, []))
 
     def load(self):
         if not os.path.isfile(self.manifest):
@@ -104,19 +230,31 @@ class Release:
         except (OSError, ValueError):
             return None
 
-    def save_step(self, no):
+    def save_step(self, no, skipped=None):
         m = self.load()
         steps = {}
         # 別の版で作った段階の記録は引き継がない。引き継ぐと、版をまたいで積み上げた記録が
         # 再開の検査を通してしまう
         if m and m.get('commit') == self.commit and m.get('steps'):
             steps.update(m['steps'])
+        # 上流を回し直したら、下流の成功記録は無効にする。残すと、途中で落ちた回でも
+        # 以前の後続段階が「同じ回に通った」ものとして再利用される
+        for later in [k for k in steps if k.isdigit() and int(k) > no]:
+            del steps[later]
         h = {}
-        for rel in STEP_ARTIFACTS.get(no, []):
-            f = os.path.join(self.box, rel)
-            h[rel] = sha256(f) if os.path.isfile(f) else ''
-        steps[str(no)] = {'at': now(), 'artifacts': h}
-        obj = {'commit': self.commit, 'dirty': self.dirty, 'at': now(), 'steps': steps}
+        for parts in self.artifacts_for(no):
+            f = os.path.join(self.box, *parts)
+            h[rel_key(parts)] = sha256(f) if os.path.isfile(f) else ''
+        steps[str(no)] = {'at': now(), 'run': self.run_id, 'artifacts': h}
+        if skipped:
+            steps[str(no)] = {'at': now(), 'run': self.run_id, 'artifacts': {},
+                              'skipped': True, 'reason': skipped}
+        obj = {'commit': self.commit, 'dirty': self.dirty, 'at': now(),
+               'run': self.run_id,
+               'input': input_digest(self.box),
+               'declarations': decl_digest(self.repo),
+               'env': env_id(),
+               'steps': steps}
         os.makedirs(os.path.dirname(self.manifest), exist_ok=True)
         text = json.dumps(obj, ensure_ascii=False, indent=2)
         with open(self.manifest, 'w', encoding='utf-8', newline='\r\n') as f:
@@ -134,13 +272,36 @@ class Release:
             bad.append('前の回はコミット %s、今は %s' % (m.get('commit'), self.commit))
         if m.get('dirty') or self.dirty:
             bad.append('作業ツリーに未コミットの変更がある。どの版で作った成果物かを確かめられない')
+        now_input = input_digest(self.box)
+        if not m.get('input'):
+            bad.append('前の回の記録に受領データの指紋が無い。通しで回して記録を作り直す')
+        elif m.get('input') != now_input:
+            bad.append('受領データが前の回から変わっている。段を飛ばすと、別のカットで'
+                       '作った層が混ざる')
+        if not m.get('declarations'):
+            bad.append('前の回の記録に宣言の指紋が無い。通しで回して記録を作り直す')
+        elif m.get('declarations') != decl_digest(self.repo):
+            bad.append('宣言（docs/metadata・docs/validation/acceptance の CSV）が'
+                       '前の回から変わっている。同じコミットでも成果物の意味が変わる')
+        if m.get('env') and m.get('env') != env_id():
+            bad.append('環境が前の回と違う（前 %s / 今 %s）' % (m.get('env'), env_id()))
         for n in step_nos:
             s = (m.get('steps') or {}).get(str(n))
             if not s:
                 bad.append('[%d] を実施した記録が無い' % n)
                 continue
-            for rel, want in (s.get('artifacts') or {}).items():
-                f = os.path.join(self.box, rel)
+            if s.get('skipped'):
+                bad.append('[%d] は飛ばした段である。実施していないものを再利用できない' % n)
+                continue
+            if not (s.get('artifacts') or {}) and n not in VERIFY_ONLY:
+                bad.append('[%d] は成果物の記録を持たない。実施した記録だけでは、'
+                           '同じ回のものだと確かめられない。'
+                           'docs/metadata/release-artifacts.csv にこの段の'
+                           '成果物を宣言する' % n)
+                continue
+            for key, want in (s.get('artifacts') or {}).items():
+                rel = norm_key(key)
+                f = os.path.join(self.box, *rel.split('/'))
                 if not want:
                     bad.append('[%d] %s は前の回に作られていない' % (n, rel))
                     continue
@@ -161,9 +322,20 @@ def main():
     runcommon.setup_console()
     ap = argparse.ArgumentParser()
     ap.add_argument('--from', dest='from_step', type=int, default=1)
-    ap.add_argument('--skip-sas', action='store_true')
+    ap.add_argument('--skip-sas', action='store_true',
+                    help='SAS 系の生成を飛ばす（--skip 2 と同じ）')
+    ap.add_argument('--skip', default='',
+                    help='飛ばす段の番号。カンマ区切り。飛ばした段は通ったものとして'
+                         '数えず、後の回でも再利用できない')
+    ap.add_argument('--methods-dir',
+                    help='枠組みの review/ の置き場（環境変数 TRIAL_REVIEW_DIR より優先）。'
+                         '固定データの検証がここのスクリプトを使う')
     ap.add_argument('--encoding', choices=['utf8', 'sjis'], default='utf8')
     args = ap.parse_args()
+
+    skip = {int(x) for x in args.skip.replace('，', ',').split(',') if x.strip().isdigit()}
+    if args.skip_sas:
+        skip.add(2)
 
     os.chdir(REPO)
     rscript = runcommon.find_rscript()
@@ -178,6 +350,24 @@ def main():
                                 capture_output=True, text=True).stdout.strip())
     rel = Release(box, commit, dirty)
 
+    def methods_dir():
+        """枠組みの review/ を探す。試験側は pipeline/scripts/python だけを写すので、
+        固定データの検証のスクリプトは枠組み側にしか無い。"""
+        cands = []
+        if args.methods_dir:
+            cands.append(args.methods_dir)
+        if os.environ.get('TRIAL_REVIEW_DIR'):
+            cands.append(os.environ['TRIAL_REVIEW_DIR'])
+        home = os.path.expanduser('~')
+        for parent in (os.path.join(home, 'Projects', 'nnh'),
+                       os.path.join(home, 'Projects', 'stat'),
+                       os.path.join(home, 'Projects'), home):
+            cands.append(os.path.join(parent, 'trial-planning-and-analysis', 'review'))
+        for c in cands:
+            if os.path.isdir(os.path.join(c, 'sap-review')):
+                return c
+        return None
+
     def r(*a):
         return run([rscript] + list(a))
 
@@ -188,13 +378,35 @@ def main():
         """program/r 配下の R プログラム。名前は <試験ID>_<段階>.R で組み立てる"""
         return r(os.path.join(REPO, 'program', 'r', '%s_%s.R' % (trial, name)), *a)
 
-    def step1():
-        if args.skip_sas:
-            print('  --skip-sas のため飛ばす')
-            return 0
+    def verify_fixed_data():
+        """固定データの検証。受領物を走査し、宣言と突き合わせる。何も書き出さない。
+
+        生成の前に置く。受領データ由来の不整合をデータセンターへ照会する時間を確保する
+        ためで、解析の終盤で見つけると間に合わない（analysis-pipeline-plan.md）。
+        """
+        m = methods_dir()
+        if m is None:
+            print('  枠組みの review/ が見つかりません。--methods-dir か'
+                  ' TRIAL_REVIEW_DIR で指定してください')
+            return 2
+        audit = os.path.join(m, 'sap-review', 'audit_fixed_data.py')
+        raw = os.path.join(box, 'input', 'rawdata')
+        cmd = [PY, audit, 'audit', raw]
+        expect = os.path.join(REPO, 'docs', 'metadata', 'received-values.csv')
+        if os.path.isfile(expect):
+            cmd += ['--expect', expect]
+        man = os.path.join(REPO, 'docs', 'metadata', 'received-manifest.csv')
+        if os.path.isfile(man):
+            cmd += ['--manifest', man]
+        else:
+            print('  受領マニフェストが無いので、直下のファイルをすべて読みます'
+                  '（docs/metadata/received-manifest.csv）')
+        return run(cmd)
+
+    def gen_sas():
         return py('run-all-sas.py', '--encoding', args.encoding)
 
-    def step2():
+    def gen_r():
         for f in ('CSVtoSDTM', 'SDTMtoADaM', 'ARD'):
             code = rprog(f)
             if code:
@@ -205,12 +417,18 @@ def main():
             return code
         return rprog('TLF', '--lang=both', '--ard=sas')
 
-    def step3():
+    def sdtm_define():
+        # SDTM の define.xml の更新と CDISC CORE による適合性検証。順序と中身は
+        # run-sdtm-validation.py が正本で、ここへ写さない。CORE の無い端末では
+        # 2 を返すので、その端末では --skip で明示して飛ばす
+        return py('run-sdtm-validation.py')
+
+    def adam_define():
         # 宣言と実データの照合 → define.xml → define.html。順序と中身は
         # run-adam-validation.py が正本で、ここへ写さない
         return py('run-adam-validation.py')
 
-    def step4():
+    def traceability():
         # 仕様書 HTML → 索引 → ブラウザでの確認の順。作業用の索引の出力先は
         # build-traceability.py の既定（output/tlf/traceability.html）に任せ、ここでは名指しない。
         # 仕様書側の戻り道だけは作業用の並び（output/spec から見た索引）を渡す。
@@ -223,7 +441,7 @@ def main():
             return code
         return py('check-traceability.py')
 
-    def step5():
+    def compare_layers():
         for f in ('CompareSDTM', 'CompareADaM', 'Compare'):
             code = rprog(f)
             if code:
@@ -267,7 +485,7 @@ def main():
                 return code
         return 0
 
-    def step6():
+    def ars():
         for sysname in ('sas', 'r'):
             code = py('build-ars-json.py', '--system', sysname)
             if code:
@@ -278,7 +496,7 @@ def main():
                 return code
         return py('check-ars-tlf.py', '--system', 'r')
 
-    def step7():
+    def check_outputs():
         code = py('check-tlf-index.py')
         if code:
             return code
@@ -286,15 +504,25 @@ def main():
         # playwright や Box が無い端末で 0 が返ると、1件も撮らないままこの段階が通る（C3-124）
         return py('check-visual-regression.py')
 
-    plan = [(1, 'SAS 系の生成', step1), (2, 'R 系の生成', step2),
-            (3, 'ADaM の define', step3), (4, 'トレーサビリティ索引', step4),
-            (5, '層ごとの突合', step5), (6, 'ARS の生成と検証', step6),
-            (7, '成果物の検査', step7)]
+    def package():
+        code = py('build-pi-package.py')
+        if code:
+            return code
+        return py('check-pi-package.py')
+
+    plan = [(1, '固定データの検証', verify_fixed_data),
+            (2, 'SAS 系の生成', gen_sas),
+            (3, 'R 系の生成', gen_r),
+            (4, 'SDTM の define と適合性検証', sdtm_define),
+            (5, 'ADaM の define', adam_define),
+            (6, 'トレーサビリティ索引', traceability),
+            (7, '層ごとの突合', compare_layers),
+            (8, 'ARS の生成と検証', ars),
+            (9, '成果物の検査', check_outputs),
+            (10, '納品パッケージの組み立てと検査', package)]
 
     # 前の回の生成物を使う段階を先に検査する。1件でも確かめられなければ何も回さずに落とす
-    reuse = [n for n in range(1, len(plan) + 1) if n < args.from_step]
-    if args.skip_sas and 1 not in reuse:
-        reuse = [1] + reuse
+    reuse = [n for n in range(1, len(plan) + 1) if n < args.from_step and n not in skip]
     if reuse:
         bad = rel.check_reuse(reuse)
         if bad:
@@ -307,9 +535,16 @@ def main():
         print('前の回（コミット %s）の生成物を使う: 段階 %s'
               % (commit, '、'.join(str(n) for n in reuse)))
 
+    skipped = []
     for no, name, body in plan:
         if no < args.from_step:
             print('[%d] %s … 飛ばす（--from %d）' % (no, name, args.from_step))
+            continue
+        if no in skip:
+            print('')
+            print('=== [%d] %s === 飛ばす（--skip）' % (no, name))
+            rel.save_step(no, skipped='--skip で指定')
+            skipped.append((no, name))
             continue
         print('')
         print('=== [%d] %s ===' % (no, name))
@@ -319,13 +554,21 @@ def main():
         if code != 0:
             print('')
             print('落ちた段階: [%d] %s（終了コード %d）' % (no, name, code))
+            if code == 2:
+                print('  終了コード2は「検査が走らなかった」を表します。件数を0と読まない。')
+                print('  この端末で回せない段なら --skip %d で明示して飛ばします。' % no)
             print('[%d] %s で落ちました。直してから通すこと。' % (no, name))
             return 1
         rel.save_step(no)
         print('  通った（%s 秒）' % sec)
 
     print('')
-    print('全段階が通りました。納品パッケージは scripts/build-pi-package.py で作ります。')
+    if skipped:
+        print('飛ばした段があります: %s'
+              % '、'.join('[%d] %s' % (n, s) for n, s in skipped))
+        print('区間2は完了していません。飛ばした段は別の端末で回すこと。')
+        return 1
+    print('区間2の全段階が通りました。')
     return 0
 
 

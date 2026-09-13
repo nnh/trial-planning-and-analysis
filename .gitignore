@@ -5,3 +5,6 @@ __pycache__/
 # OS・エディタ
 .DS_Store
 Thumbs.db
+
+# セッション中に参照した添付（公開リポジトリなので追跡しない）
+attachments/

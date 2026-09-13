@@ -20,7 +20,7 @@
 
 ### 実行の入口
 
-- `python/run-release.py` — 固定データから納品までを一続きで回し、どこかで検査が落ちたらそこで止める
+- `python/run-release.py` — 固定データの検証から納品パッケージまで、区間2の全段を一続きで回し、どこかで検査が落ちたらそこで止める。飛ばした段は通ったものとして数えない
 - `python/run-all-sas.py` — SAS 系の本流を受領CSVから図表まで回す
 - `python/run-adam-json.py` — ADaM の Dataset-JSON の後処理
 - `python/run-adam-validation.py` — ADaM の宣言の照合と define 一式の作り直し
@@ -44,7 +44,8 @@
 
 ### 検査
 
-- `python/check-decisions.py` — 決定の正本が1つに保たれているか（[analysis-pipeline-plan.md](analysis-pipeline-plan.md)「検査で守る」）
+- `python/check-environment.py` — この端末で何が回せるか（処理系・SAS・CDISC CORE・スキル・枠組みの置き場）。試験のリポジトリが無くても動く。立ち上げの最初に回す
+- `python/check-decisions.py` — 決定の正本が1つに保たれているか、判断票（区分が未決の行）が状態を持つか（[analysis-pipeline-plan.md](analysis-pipeline-plan.md)「検査で守る」）。`--gate` は未決が残っていれば落とす
 - `python/check-review-ledger.py` — 独立レビューの台帳で、状態欄と各項の記録が食い違っていないか
 - `python/check-ars-tlf.py` — ReportingEvent と、実際に配る図表・ARD が同じものを指しているか
 - `python/check-tlf-index.py` — 図表の宣言
@@ -82,6 +83,6 @@
 
 実行できる形で置くのは Python と R に限る。納品先の研究者が別の系統の端末を使うことは多く、納品パッケージを受け取った側が完全に再現できる状態にするには、実行できる形をその2つに限る必要がある。処理系を1つ足すたびに、それが入っていない端末では回せないだけでなく、コードを読むこともできない経路が生まれる。理由と、どちらへ寄せるかの決め方は [analysis-pipeline-plan.md](analysis-pipeline-plan.md)「実行できる形を Python と R に限る」が持つ。
 
-実行の入口が PowerShell だった時期がある。試験側が 2026-09-05 にその6本を Python 5本と R 1本へ移し、枠組みも 2026-09-13 に同じ形へ揃えて PowerShell を落とした。移植の前後で振る舞いが変わっていないことの確かめ方は同[「別の処理系へ移すときの確かめ方」](analysis-pipeline-plan.md)が持つ。
+処理系を移すときに、移植の前後で振る舞いが変わっていないことをどう確かめるかは同[「別の処理系へ移すときの確かめ方」](analysis-pipeline-plan.md)が持つ。入口の処理系がここへ至るまでの経緯は [../history.md](../history.md) が持つ。
 
 Python は生成と実行の経路を標準ライブラリだけで動かす。外部パッケージが要るのは検査の3本で、`check-ars-json.py` の JSON-Schema による検証に `jsonschema`、`check-traceability.py` のページの取得と `check-visual-regression.py` の描画に `playwright` が要る。いずれも関数の中で読み込み、入っていない環境では合否と区別できる終了コードで「検証できなかった」と返し、黙って通さない。飛ばす口（`--allow-skip`）は付けてよいが、既定は落ちる側にする。この境目を処理系の選択で崩さない。標準ライブラリで足りない処理を Python へ足すと、外部パッケージが要る場所が検査から生成の側へ移る。受領資料の xlsx を読むために openpyxl のような外部パッケージを足さない。対象の端末は Windows と macOS にまたがり、企業ネットワークの制約で pip が通らないものがあるため、依存を1つ足すたびに「入っている端末と入っていない端末」が生まれる。xlsx は ZIP と XML なので、読むだけなら標準ライブラリで足りる（`read_xlsx.py`）。図表の xlsx を書き出すのは R 側（`{openxlsx2}`・`{mschart}`）が持つので、Python 側は読み取りに限る。

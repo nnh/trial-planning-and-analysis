@@ -406,9 +406,22 @@ def main():
         err.append(rule)
     elif an is None:
         err.append(f'主要評価項目の解析 {aid} が ReportingEvent に無い')
-    elif os.path.isfile(dec_p):
+    else:
+        # 判定の記録が無いときに照合を飛ばして成功すると、主要評価項目の下限・上限・判定
+        # そのものを見ないまま「ReportingEvent と成果物は対応している」と出る。主要評価項目
+        # を宣言した試験では、記録の不在は材料不足として終える
+        if not os.path.isfile(dec_p):
+            print(f'ERROR: 材料が無い: {dec_p}')
+            print('  主要評価項目を宣言した試験では判定の記録が要る。ARD を回し直すこと')
+            return 2
+        dec_rows = read_csv(dec_p)
+        if len(dec_rows) != 1:
+            print(f'ERROR: 判定の記録が {len(dec_rows)} 行ある: {dec_p}')
+            print('  1行でなければ、どれが主要評価項目の判定かが決まらない。'
+                  '先頭行で代用しない')
+            return 2
         cstat, cop, cref, thr = rule
-        dec = read_csv(dec_p)[0]
+        dec = dec_rows[0]
         vals = {}
         for r in an.get('results', []):
             op = (r.get('operationId') or '').rsplit('.', 1)[-1]
@@ -450,8 +463,6 @@ def main():
               f'（{pe["estimate_operation"]} {dec.get("estimate")} / '
               f'{cstat} {dec.get("lcl")} / {cref} {thr}・{pe["comparison"]}・'
               f'ci_method {pe["ci_method"]}）')
-    else:
-        print(f'判定の記録が無いので照合を飛ばす: {dec_p}')
 
     # 5. 図表ごとの受入基準。列が欠けたまま回すと、行ごとの照合が1件も走らないまま
     #    合格になるので、列の有無は表の外側で1度だけ見て、欠けていれば材料不足で終える

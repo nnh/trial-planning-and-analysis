@@ -7,6 +7,14 @@ Ptosh からエクスポートした eCRF 構造定義 JSON を読み、設計�
 
     python audit_ecrf_json.py <構造定義JSON> [--format text|tsv] [--severity error|warning|info]
 
+終了コード
+
+    0  error の指摘なし（warning・info は出ていてもよい）
+    1  error の指摘あり。工程の出口条件を満たさない
+    2  検査が走らなかった（入力が読めない等）。件数を0と読まない
+
+--severity は表示を絞るだけで、終了コードは絞る前の error の件数で決まる。
+
 標準ライブラリのみで動く。実データ（SDTM）は見ない。実データ側の確認項目は
 checklist.md の「実データでの裏打ち」を参照。
 """
@@ -406,13 +414,21 @@ def main():
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
 
-    spec = load(args.spec)
+    try:
+        spec = load(args.spec)
+    except (OSError, ValueError) as e:
+        print("エラー: 構造定義 JSON を読めません: %s（%s）" % (args.spec, e))
+        return 2
     sheets, options = build_index(spec)
 
     limit = SEVERITY_ORDER[args.severity]
     findings = []
+    n_error = 0
     for rule in RULES:
         for f in rule(spec, sheets, options):
+            # 終了コードは表示の絞り込みの前に決める。--severity で隠しても不適合は残る
+            if f.severity == "error":
+                n_error += 1
             if SEVERITY_ORDER[f.severity] <= limit:
                 findings.append(f)
     findings.sort(key=lambda f: (SEVERITY_ORDER[f.severity], f.rule_id, f.sheet))
@@ -424,7 +440,7 @@ def main():
             print("\t".join([f.severity, f.rule_id, f.rule, f.sheet, f.field,
                              f.label.replace("\t", " "),
                              f.detail.replace("\t", " ")]))
-        return
+        return 1 if n_error else 0
 
     total_fields = sum(len(s["fields"]) for s in sheets)
     print("試験: %s（%s）" % (spec.get("proper_name") or spec.get("name"),
@@ -454,7 +470,11 @@ def main():
         print("- %s%s\n  %s" % (loc, ("｜" + f.label if f.label else ""), f.detail))
     if not findings:
         print("指摘なし。")
+    if n_error:
+        print()
+        print("error があるので終了コード 1 を返します。工程の出口条件を満たしません。")
+    return 1 if n_error else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

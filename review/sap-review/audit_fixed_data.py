@@ -46,6 +46,7 @@ XPT は外部パッケージ（pyreadstat）が要るので、関数の中で読
 import argparse
 import collections
 import csv
+import hashlib
 import json
 import os
 import re
@@ -75,7 +76,14 @@ SUBJECT_KEYS = ("USUBJID", "SUBJID", "SUBJECTID")
 KEY_EXCLUDED_SUFFIXES = ("SEQ", "DY")
 
 # 突合のキーの候補。被験者の識別子に続けて、内容を表す項目を足す。
-KEY_SUFFIX_CANDIDATES = ("SPID", "TESTCD", "TERM", "TRT", "CAT", "LNKID")
+# 判定を表す変数はキーに入れない（下の diff_key）。TERM はかつて候補だったが、
+# DSTERM のように判定変数でもあるため、変わった行が別の行として数えられていた。
+KEY_SUFFIX_CANDIDATES = ("SPID", "TESTCD", "TRT", "CAT", "LNKID")
+
+# 実行時の設定。既定は「直さない・直下だけ見る」で、緩めるときは引数で明示する。
+ALLOW_RAGGED = False
+RECURSIVE = False
+RAGGED_FIXED = []
 KEY_PLAIN_CANDIDATES = ("VISITNUM", "VISIT")
 
 # 空白・判定不能を表す値。集計から静かに外れる、または 0 件で通る素地になる。
@@ -148,6 +156,26 @@ def read_csv(path, encoding):
             "疑いがある。--encoding で指定し直す" % (path, encoding, e.reason))
     header = [h.strip().upper() for h in header]
     width = len(header)
+
+    dupes = sorted({h for h in header if header.count(h) > 1})
+    if dupes:
+        raise Unreadable(
+            "%s のヘッダに同じ列名が複数ある: %s。どちらの列を読むかが決まらない"
+            % (path, "・".join(dupes)))
+
+    # 列数の合わない行は直さずに拒否する。余りを捨てると自由記述の中のカンマで
+    # 列がずれた受領物を、切り詰めた別の表として検査してしまう。足りない分を空欄で
+    # 埋めると、落ちた列が「値なし」として集計に入る。どちらも受領物の構造不良を
+    # 検出せずに通す。受領仕様が末尾の欠落を許すときだけ --allow-ragged で明示する。
+    bad = [(i, len(r)) for i, r in enumerate(rows, start=2) if len(r) != width]
+    if bad and not ALLOW_RAGGED:
+        i, n = bad[0]
+        raise Unreadable(
+            "%s の列数が合わない（%d 行）。最初は %d 行目で、ヘッダ %d 列に対して "
+            "%d 列。引用符の欠落で自由記述のカンマが列区切りになっていないかを見る。"
+            "受領仕様が末尾の欠落を許すなら --allow-ragged を付ける"
+            % (path, len(bad), i, width, n))
+
     fixed = []
     for r in rows:
         if len(r) < width:
@@ -155,6 +183,8 @@ def read_csv(path, encoding):
         elif len(r) > width:
             r = r[:width]
         fixed.append(["" if v is None else str(v) for v in r])
+    if bad:
+        RAGGED_FIXED.append((path, len(bad)))
     return header, fixed
 
 
@@ -195,21 +225,74 @@ def domain_of(header, rows, path):
     return re.sub(r"[^A-Za-z0-9]", "", stem).upper()
 
 
-def load_dir(path, encoding):
-    """ディレクトリ配下のデータを読む。読めなければ Unreadable を投げる。"""
+def load_dir(path, encoding, manifest=None):
+    """ディレクトリ直下のデータを読む。読めなければ Unreadable を投げる。
+
+    manifest を渡したときは、そこに並んだファイルだけを読む。並んでいないファイルが
+    直下にあれば止める。写し損ないと宣言の陳腐化は、どちらも件数では分からない。
+
+    既定で直下だけを見る。手順は受領カットを版別フォルダへ保管し、解析が使う版だけを
+    直下へ置く。配下まで辿ると、保管した旧版の同じドメインも一緒に読み、解析が使う版と
+    検査が見る版が別になる。配布形式の都合で階層を持つ受領物は --recursive で明示する。
+    """
     if not os.path.isdir(path):
         raise Unreadable("ディレクトリがない: %s" % path)
-    files = []
-    for root, _dirs, names in os.walk(path):
-        for n in sorted(names):
+
+    if manifest:
+        files = []
+        bad = []
+        for name, want in manifest:
+            full = os.path.join(path, name)
+            if not os.path.isfile(full):
+                bad.append("%s が無い" % name)
+                continue
+            if want:
+                got = sha256_of(full)
+                if got != want:
+                    bad.append("%s が宣言と違う（宣言 %s… / 実物 %s…）"
+                               % (name, want[:12], got[:12]))
+            files.append(full)
+        listed = {n for n, _ in manifest}
+        for n in sorted(os.listdir(path)):
             ext = os.path.splitext(n)[1].lower()
-            if ext in (".csv", ".json", ".xpt"):
-                files.append(os.path.join(root, n))
+            if (os.path.isfile(os.path.join(path, n))
+                    and ext in (".csv", ".json", ".xpt") and n not in listed):
+                bad.append("%s は受領マニフェストに無い" % n)
+        if bad:
+            raise Unreadable(
+                "受領マニフェストと %s の中身が合わない:\n  %s"
+                % (path, "\n  ".join(bad)))
+        return read_files(files, encoding, path)
+
+    files = []
+    if RECURSIVE:
+        for root, _dirs, names in os.walk(path):
+            for n in sorted(names):
+                ext = os.path.splitext(n)[1].lower()
+                if ext in (".csv", ".json", ".xpt"):
+                    files.append(os.path.join(root, n))
+    else:
+        for n in sorted(os.listdir(path)):
+            full = os.path.join(path, n)
+            ext = os.path.splitext(n)[1].lower()
+            if os.path.isfile(full) and ext in (".csv", ".json", ".xpt"):
+                files.append(full)
     if not files:
+        sub_dirs = [n for n in sorted(os.listdir(path))
+                    if os.path.isdir(os.path.join(path, n))]
+        hint = ""
+        if sub_dirs and not RECURSIVE:
+            hint = ("。直下だけを見ている。配下の %s に入っているなら、"
+                    "解析が使う版を直下へ置くか --recursive を付ける"
+                    % "・".join(sub_dirs[:5]))
         raise Unreadable(
             "%s に CSV・Dataset-JSON・XPT がない。拡張子で探しているので、"
-            "別の拡張子で置かれていないかを見る" % path)
+            "別の拡張子で置かれていないかを見る%s" % (path, hint))
 
+    return read_files(files, encoding, path)
+
+
+def read_files(files, encoding, path):
     datasets = []
     for p in sorted(files):
         ext = os.path.splitext(p)[1].lower()
@@ -225,6 +308,77 @@ def load_dir(path, encoding):
     if not datasets:
         raise Unreadable("%s から読めた表が 0 件だった" % path)
     return datasets
+
+
+def load_manifest(path):
+    """受領マニフェスト。現行の入力がどのファイルかを宣言で持つ。
+
+    直下だけを見る規則で旧版の混入は防げるが、写し損ないは防げない。同じ名前の
+    古いファイルが1つ残っても件数は合う。宣言に並べた集合と実在を突き合わせる。
+
+    列は file（直下からの相対名）と、任意で sha256。
+    """
+    rows = []
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        rdr = csv.DictReader(f)
+        if not rdr.fieldnames or "file" not in rdr.fieldnames:
+            raise Unreadable("受領マニフェストに file 列がない: %s" % path)
+        for r in rdr:
+            name = (r.get("file") or "").strip()
+            if name:
+                rows.append((name, (r.get("sha256") or "").strip().lower()))
+    if not rows:
+        raise Unreadable("受領マニフェストが空: %s" % path)
+    return rows
+
+
+def sha256_of(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def load_keys(path):
+    """突合のキーの宣言。列は domain と key（; 区切りの変数名）。
+
+    キーを実装の推測に任せると、ドメインごとに何で結んだかが結果から読めない。
+    宣言があれば、結べなかったことも宣言との差として出せる。
+    """
+    out = {}
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        rdr = csv.DictReader(f)
+        need = ("domain", "key")
+        if not rdr.fieldnames or any(c not in rdr.fieldnames for c in need):
+            raise Unreadable("キーの宣言に domain・key 列がない: %s" % path)
+        for r in rdr:
+            dom = (r.get("domain") or "").strip().upper()
+            key = [x.strip().upper()
+                   for x in (r.get("key") or "").replace(";", ",").split(",")
+                   if x.strip()]
+            if dom:
+                out[dom] = key
+    if not out:
+        raise Unreadable("キーの宣言が空: %s" % path)
+    return out
+
+
+def by_domain(datasets, path):
+    """ドメイン名で引ける形にする。同名が2つあれば止める。
+
+    辞書に詰め直すと後から読んだ方が黙って残る。保管した旧版が混ざったとき、
+    解析が使う版と検査が見る版が別になったことに気づけない。
+    """
+    out = {}
+    for d in datasets:
+        if d.domain in out:
+            raise Unreadable(
+                "%s に同じドメイン %s の表が 2 つある（%s と %s）。どちらを使うかが"
+                "決まらない。解析が使う版だけを置く"
+                % (path, d.domain, out[d.domain].source, d.source))
+        out[d.domain] = d
+    return out
 
 
 def load_expect(path):
@@ -482,12 +636,20 @@ def rule_occur_dates(datasets):
 
 
 def diff_key(ds):
-    """突合のキーを選ぶ。--SEQ は固定時に振り直されるので使わない（4.4）。"""
+    """突合のキーを選ぶ。
+
+    --SEQ は固定時に振り直されるので使わない（4.4）。判定を表す変数も使わない。
+    キーに入れると、その値が変わった行が別の行になり、追加1・削除1として数えられて、
+    判定の変化として出てこない。DSTERM のようにキー候補と判定変数の両方に当たる
+    変数がこれに当たる。変わりうる値を突合の軸にしない。
+    """
     key = []
     subj = ds.subject_key()
     if subj:
         key.append(subj)
     for suf in KEY_SUFFIX_CANDIDATES:
+        if suf in DECISION_SUFFIXES:
+            continue
         name = ds.suffix(suf)
         if name and name not in key:
             key.append(name)
@@ -514,9 +676,10 @@ def is_decision(ds, var):
     return var[len(ds.domain):] in DECISION_SUFFIXES
 
 
-def run_diff(before, after, encoding, max_shown):
-    b = {d.domain: d for d in load_dir(before, encoding)}
-    a = {d.domain: d for d in load_dir(after, encoding)}
+def run_diff(before, after, encoding, max_shown,
+             man_before=None, man_after=None, keys=None):
+    b = by_domain(load_dir(before, encoding, man_before), before)
+    a = by_domain(load_dir(after, encoding, man_after), after)
     lines = []
     lines.append("固定前: %s（ドメイン %d・レコード %d）" %
                  (before, len(b), sum(len(d.rows) for d in b.values())))
@@ -534,15 +697,40 @@ def run_diff(before, after, encoding, max_shown):
         lines.append("")
 
     changed_decision = []
+    # 判定への影響を確かめられなかったもの。0 件でないなら「変化なし」とは返せない
+    unverified = []
+    for dom in only_b:
+        unverified.append("%s  固定後に無い。判定への影響は未評価" % dom)
+    for dom in only_a:
+        unverified.append("%s  固定前に無い。判定への影響は未評価" % dom)
     for dom in sorted(set(a) & set(b)):
         da, db = a[dom], b[dom]
-        key = diff_key(db)
+        if keys is not None:
+            if dom not in keys:
+                lines.append("## %s  キーの宣言が無いので件数だけ出す"
+                             "（固定前 %d → 固定後 %d）" %
+                             (dom, len(db.rows), len(da.rows)))
+                unverified.append("%s  突合のキーが宣言されていない。行ごとの照合を"
+                                  "していない" % dom)
+                continue
+            key = list(keys[dom])
+            lack = [k for k in key if k not in db.columns or k not in da.columns]
+            if lack:
+                lines.append("## %s  宣言されたキーの変数が無い: %s" %
+                             (dom, "・".join(lack)))
+                unverified.append("%s  宣言されたキー %s がデータに無い。照合不能"
+                                  % (dom, "+".join(key)))
+                continue
+        else:
+            key = diff_key(db)
+            key = [k for k in key if k in da.columns]
         if not key:
             lines.append("## %s  突合のキーが決まらないので件数だけ出す"
                          "（固定前 %d → 固定後 %d）" %
                          (dom, len(db.rows), len(da.rows)))
+            unverified.append("%s  突合のキーが決まらない。行ごとの照合ができていない"
+                              % dom)
             continue
-        key = [k for k in key if k in da.columns]
         ra, seen_a = keyed_rows(da, key)
         rb, seen_b = keyed_rows(db, key)
 
@@ -553,6 +741,15 @@ def run_diff(before, after, encoding, max_shown):
         cols = [c for c in db.columns
                 if c in da.columns
                 and not any(c.endswith(s) for s in KEY_EXCLUDED_SUFFIXES)]
+        # 片側にしかない列は値の比較に入らない。判定を表す列なら未評価として残す
+        for c in sorted(set(db.columns) - set(da.columns)):
+            if is_decision(db, c):
+                unverified.append("%s.%s  固定後に列が無い。判定への影響は未評価"
+                                  % (dom, c))
+        for c in sorted(set(da.columns) - set(db.columns)):
+            if is_decision(da, c):
+                unverified.append("%s.%s  固定前に列が無い。判定への影響は未評価"
+                                  % (dom, c))
         per_var = collections.Counter()
         transitions = collections.defaultdict(collections.Counter)
         changed_rows = set()
@@ -578,6 +775,11 @@ def run_diff(before, after, encoding, max_shown):
         if dupes:
             lines.append("  キーが一意でない組が %d 件ある。出現順で対応付けた"
                          "ので、内容変更の件数は上限値として読む" % dupes)
+            unverified.append("%s  キーが一意でない組が %d 件。行の対応が確定して"
+                              "いない" % (dom, dupes))
+        if added or removed:
+            unverified.append("%s  行が増減した（追加 %d・削除 %d）。判定への影響は"
+                              "未評価" % (dom, len(added), len(removed)))
         for c, n in sorted(per_var.items(), key=lambda x: (-x[1], x[0]))[:max_shown]:
             mark = " ← 判定を表す変数" if is_decision(db, c) else ""
             lines.append("  %s: %d 件変更%s" % (c, n, mark))
@@ -590,19 +792,29 @@ def run_diff(before, after, encoding, max_shown):
     lines.append("## 判定を表す変数の変化")
     if changed_decision:
         lines.extend("  " + s for s in changed_decision)
+    else:
+        lines.append("  なし。")
+
+    lines.append("")
+    lines.append("## 判定への影響を確かめられなかったもの")
+    if unverified:
+        lines.extend("  " + s for s in unverified)
+    else:
+        lines.append("  なし。")
+
+    if changed_decision or unverified:
         lines.append("")
         lines.append("  イベント判定が変わりうる。電子症例報告書のクエリ記録を"
                      "取り寄せて経緯を確認する（data-verification.md 4.4）。")
-    else:
-        lines.append("  なし。")
-    return lines, bool(changed_decision)
+        lines.append("  未評価が残っている間は「変化なし」とは読まない。")
+    return lines, bool(changed_decision or unverified)
 
 
 # ---------------------------------------------------------------- 出力
 
 
-def run_inventory(path, encoding, max_levels):
-    datasets = load_dir(path, encoding)
+def run_inventory(path, encoding, max_levels, manifest=None):
+    datasets = load_dir(path, encoding, manifest)
     lines = ["対象: %s（ドメイン %d・レコード %d・変数 %d）" %
              (path, len(datasets), sum(len(d.rows) for d in datasets),
               sum(len(d.columns) for d in datasets)), ""]
@@ -636,8 +848,8 @@ def run_inventory(path, encoding, max_levels):
     return lines
 
 
-def run_audit(path, encoding, expect_path, max_levels):
-    datasets = load_dir(path, encoding)
+def run_audit(path, encoding, expect_path, max_levels, manifest=None):
+    datasets = load_dir(path, encoding, manifest)
     expect = load_expect(expect_path) if expect_path else {}
 
     findings = []
@@ -666,11 +878,32 @@ def main():
     p.add_argument("--severity", choices=SEVERITIES, default="info",
                    help="この深刻度までを出す（既定 info＝全部）")
     p.add_argument("--format", choices=("text", "tsv"), default="text")
+    p.add_argument("--allow-ragged", action="store_true",
+                   help="列数の合わない行を拒否せず、末尾を埋めるか切り詰める"
+                        "（受領仕様が末尾の欠落を許す場合だけ）")
+    p.add_argument("--recursive", action="store_true",
+                   help="ディレクトリの配下まで辿る（既定は直下だけ）")
+    p.add_argument("--manifest",
+                   help="受領マニフェスト（列 file・任意で sha256）。"
+                        "並んだファイルだけを読み、並んでいないものが直下にあれば止める")
+    p.add_argument("--manifest2",
+                   help="diff の固定後に当てる受領マニフェスト")
+    p.add_argument("--keys",
+                   help="突合のキーの宣言（列 domain・key）。"
+                        "宣言の無いドメインは照合せず未評価として残す")
     a = p.parse_args()
 
+    global ALLOW_RAGGED, RECURSIVE
+    ALLOW_RAGGED = a.allow_ragged
+    RECURSIVE = a.recursive
+
     try:
+        man = load_manifest(a.manifest) if a.manifest else None
+        man2 = load_manifest(a.manifest2) if a.manifest2 else None
+        keys = load_keys(a.keys) if a.keys else None
+
         if a.mode == "inventory":
-            for line in run_inventory(a.path, a.encoding, a.max_levels):
+            for line in run_inventory(a.path, a.encoding, a.max_levels, man):
                 print(line)
             return 0
 
@@ -679,13 +912,13 @@ def main():
                 print("ERROR: diff には固定前と固定後の 2 つを渡す")
                 return 2
             lines, decided = run_diff(a.path, a.path2, a.encoding,
-                                      a.max_levels)
+                                      a.max_levels, man, man2, keys)
             for line in lines:
                 print(line)
             return 1 if decided else 0
 
         datasets, expect, findings = run_audit(
-            a.path, a.encoding, a.expect, a.max_levels)
+            a.path, a.encoding, a.expect, a.max_levels, man)
     except Unreadable as e:
         print("検証できなかった: %s" % e)
         return 2

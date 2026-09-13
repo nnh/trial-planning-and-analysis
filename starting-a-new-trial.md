@@ -13,7 +13,7 @@
 
 着手できるのは、研究計画書と統計解析計画書の草案があり、試験の識別子とデータの置き場が決まった時点である。図表案・電子症例報告書の構造定義・受領 define.xml は 4.5. までにそろえばよい。
 
-この手順を終えた状態が、[pipeline/analysis-pipeline-plan.md](pipeline/analysis-pipeline-plan.md)「区間0 開始前の確定」の出口にあたる。区間1 以降はそこが持つ。
+この手順を終えた状態が、[pipeline/analysis-pipeline-plan.md](pipeline/analysis-pipeline-plan.md)「区間1 開始前の確定」の出口にあたる。区間2 以降はそこが持つ。
 
 ## 3. 役割と責任
 
@@ -33,6 +33,14 @@ TRIAL=<新しい試験のリポジトリのパス>
 ```
 
 ### 4.1. リポジトリの骨格
+
+最初に、この端末で何が回せるかを見る。依存の不足はデータを作り始める前にまとめて出す。回せない工程があることは、後の段で1つずつ突き当たるより、着手の前に分かっている方がよい。
+
+```bash
+python3 "$FRAMEWORK"/pipeline/scripts/python/check-environment.py
+```
+
+必須（python3・git・R・スキル2つ・枠組みの `review/`）が欠けていれば終了コード1で、そろっていれば0を返す。SAS と CDISC CORE は端末によって無いことがあり、その場合は回せない工程を挙げる。回せない工程を別端末で回すなら、どちらの端末で何を回すかを試験側の `CLAUDE.md` に書く。置き場が既定と違うものは環境変数で指す（`SAS_HOME`・`CDISC_CORE_EXE`・`CDISC_DEFINE_XML_SKILL`・`TRIAL_REVIEW_DIR`）。
 
 統計解析責任者が、試験ごとに1つのリポジトリを作る。ディレクトリの形と、そう分ける理由は [pipeline/analysis-pipeline-plan.md](pipeline/analysis-pipeline-plan.md)「リポジトリ側の構成」が持つ。下のコマンドはその形を作るだけで、意図はそこを読む。
 
@@ -111,8 +119,13 @@ cd "$TRIAL" && python3 -c "import sys; sys.path.insert(0, 'scripts'); import box
 統計解析責任者が、集めた資料に立案時レビューを当てる。回す順序・機械検査・指摘の形は [skills/trial-planning-review/](skills/trial-planning-review/SKILL.md) が持ち、判断が要る項目の規則は [review/](review/README.md) の各チェックリストが持つ。
 
 ```bash
+mkdir -p ~/.claude/skills
 cp -r "$FRAMEWORK"/skills/trial-planning-review ~/.claude/skills/
+cp -r "$FRAMEWORK"/skills/cdisc-define-xml ~/.claude/skills/
+export TRIAL_REVIEW_DIR="$FRAMEWORK/review"
 ```
+
+写すスキルは2つある。`trial-planning-review` はこの段で使い、`cdisc-define-xml` は後の ADaM の define.xml の生成が読む。立案の段で片方だけ写すと、不足が分かるのは解析に入ってからになる。`TRIAL_REVIEW_DIR` は実行器が方法論を探す場所で、指定が無いときはホーム配下の決め打ちの候補を順に見る。枠組みをそこに置いていない端末では、この変数か `--methods-dir` が無いと検査が1件も回らない。
 
 対象ごとの実施の時期は [review/README.md](review/README.md)「実施の時期」が持つ。研究計画書は倫理審査へ出す前、電子症例報告書は EDC 固定の前、統計解析計画書と図表案は固定の前である。この時期を逃すと以降は改訂手続きになるので、4.1. から 4.4. の完了を待たずに資料の依頼を出す。
 
@@ -130,11 +143,11 @@ cp -r "$FRAMEWORK"/skills/trial-planning-review ~/.claude/skills/
 
 決めた結果の置き場は2つに分かれる。統計解析計画書の本文と、4.2. で配置した機械可読な宣言である。宣言のうち受入基準の3本は実装を見ずに一次文書から起こす。実装ができてから書くと基準が実装の写しになり、二重コーディングの両系統が同じ誤りを共有したときに突合が通る。
 
-決めた事項が統計解析計画書の文言と食い違ったら、改訂するか逸脱として持つかをその場で決める。決めずに置くと、総括報告書の段で一次文書と実装の食い違いとして再浮上する。
+決めた事項が統計解析計画書の文言と食い違ったら、改訂するか逸脱として持つかをその場で決める。決めずに置くと、総括報告書の段で一次文書と実装の食い違いとして再浮上する。どちらを採るかの条件は [pipeline/analysis-pipeline-plan.md](pipeline/analysis-pipeline-plan.md)「正本の階層を守る」が持つ。逸脱として持つなら、承認・根拠・報告先を決定の台帳に置く。
 
 ### 4.7. 立ち上げの確認
 
-統計解析責任者が、区間0の出口条件を満たしたことを確かめる。条件は [pipeline/analysis-pipeline-plan.md](pipeline/analysis-pipeline-plan.md)「区間0 開始前の確定」が持つ。
+統計解析責任者が、区間1の出口条件を満たしたことを確かめる。条件は [pipeline/analysis-pipeline-plan.md](pipeline/analysis-pipeline-plan.md)「区間1 開始前の確定」が持つ。
 
 あわせて次を見る。
 

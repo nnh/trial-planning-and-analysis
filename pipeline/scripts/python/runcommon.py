@@ -29,7 +29,9 @@ import subprocess
 import sys
 import time
 
-SAS_HOME = r'C:\Program Files\SASHome\SASFoundation\9.4'
+# SAS の導入先。端末で違うので環境変数で変えられる（既定は Windows の標準の導入先）。
+# 端末ごとに何が回せるかは pipeline/scripts/python/check-environment.py が見る。
+SAS_HOME = os.environ.get('SAS_HOME') or r'C:\Program Files\SASHome\SASFoundation\9.4'
 SAS_EXE = os.path.join(SAS_HOME, 'sas.exe')
 SAS_CONFIG = {
     'utf8': os.path.join(SAS_HOME, 'nls', 'u8', 'sasv9.cfg'),

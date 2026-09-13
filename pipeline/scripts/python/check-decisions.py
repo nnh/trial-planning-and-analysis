@@ -5,14 +5,23 @@
 # 主要評価項目の信頼区間の形式は5つの md と1つの CSV の6箇所にあった。表 5.4.3.1 の
 # 分母は csr-section-map.md だけが旧規則（FAS 88例固定）のまま残っていた。
 #
-# 見るのは3つ。
+# 見るのは4つ。
 #   1. 一覧が本文と一致するか。一覧は区分ブロックから作るもので、手で維持しない
 #   2. 仕様書が決定を述べていないか。述べる代わりに台帳の識別子を引く規則の検査
 #   3. 事後の決定が analysis-purpose.csv の reason に現れているか
+#   4. 区分が「未決」のものが状態を持つか。持たないと判断票として数えられない
+#
+# 判断票は別の台帳を作らず、この台帳の同じ行で持つ。区分「未決」がその状態で、
+# 「- 状態：」に回答待ち・再計算待ち・決定待ちのどれかを書く。仮に進めたなら
+# 「- 仮採用：」に採った案を、動かす工程があるなら「- 影響工程：」に書く。
+# 台帳を2本に分けると、決まった行を移し忘れたときに両方へ載ったままになり、
+# 「判断票0件」と「決定の件数」がどちらも信じられなくなる。
 #
 # 使い方
-#   python scripts/check-decisions.py           ... 3つとも見る
+#   python scripts/check-decisions.py           ... 4つとも見る
 #   python scripts/check-decisions.py --quiet   ... 失敗した項目だけを出す
+#   python scripts/check-decisions.py --gate    ... 未決が1件でも残っていれば落とす
+#                                                  （区間3の出口で使う）
 import argparse
 import csv
 import os
@@ -68,7 +77,9 @@ def entries():
             if cur['name'] not in FRAME:
                 out.append(cur)
         elif cur is not None:
-            for k, lab in (('区分', '- 区分：'), ('決め方', '- 決め方：'), ('CSR', '- CSR：')):
+            for k, lab in (('区分', '- 区分：'), ('決め方', '- 決め方：'), ('CSR', '- CSR：'),
+                           ('状態', '- 状態：'), ('仮採用', '- 仮採用：'),
+                           ('影響工程', '- 影響工程：')):
                 if line.startswith(lab):
                     cur[k] = line[len(lab):]
     return out
@@ -108,6 +119,35 @@ def check_index(quiet):
     if not quiet:
         print('1. 一覧と本文 : エントリ %d 件 / 一覧 %d 行' % (len(ents), len(have)))
     return bad, ents
+
+
+PENDING_STATES = ('回答待ち', '再計算待ち', '決定待ち')
+
+
+def check_pending(ents, quiet, gate):
+    """判断票（区分が未決のもの）が状態を持つか。gate なら残っていること自体を落とす。
+
+    状態を必須にするのは、未決が何を待っているかを書かないと、区間の出口で
+    「あと何を決めれば0件になるか」を台帳から読めないためである。
+    """
+    bad = []
+    pend = [e for e in ents if e.get('区分') == '未決']
+    for e in pend:
+        st = e.get('状態')
+        if not st:
+            bad.append('未決なのに状態が無い: %s（%s のどれかを書く）'
+                       % (e['name'], '・'.join(PENDING_STATES)))
+        elif st not in PENDING_STATES:
+            bad.append('未決の状態が想定外: %s の「%s」（%s のどれか）'
+                       % (e['name'], st, '・'.join(PENDING_STATES)))
+    if not quiet:
+        print('4. 判断票       : 未決 %d 件' % len(pend))
+        for e in pend:
+            print('   %s ── %s%s' % (e['name'], e.get('状態', '状態なし'),
+                                     '／仮採用あり' if e.get('仮採用') else ''))
+    if gate and pend:
+        bad.append('未決が %d 件残っている。区間の出口条件は判断票0件である' % len(pend))
+    return bad
 
 
 def check_spec(quiet):
@@ -192,10 +232,13 @@ def check_purpose(ents, quiet):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--quiet', action='store_true')
+    ap.add_argument('--gate', action='store_true',
+                    help='未決が1件でも残っていれば落とす（区間3の出口で使う）')
     a = ap.parse_args()
     bad, ents = check_index(a.quiet)
     bad += check_spec(a.quiet)
     bad += check_purpose(ents, a.quiet)
+    bad += check_pending(ents, a.quiet, a.gate)
     if bad:
         print()
         for b in bad:

@@ -2054,7 +2054,7 @@ def main():
                       'sdtm_datasets.csv',
                       'crf-field-map.csv', 'crf-option-map.csv',
                       'reference-table-rows.csv', 'reference-values.csv',
-                      'mr-timepoint.csv',
+                      'timepoint-map.csv',
                       # 集計の水準集合の正本。tlf_ops.R が読み込み時に要求する（C3-002）
                       'level-sets.csv',
                       # ARS の ReportingEvent を組み立てる宣言（C2-145）
