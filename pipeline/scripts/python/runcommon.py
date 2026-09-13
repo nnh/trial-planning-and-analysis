@@ -100,15 +100,22 @@ def trial_root():
 def find_rscript():
     """Rscript の在処。端末ごとの導入先は akiko-office の docs/r-environment.md が正本で、
     ここでは既定の場所と PATH の両方を見る。R は 4.6.1（renv.lock が版を固定する）。
+
+    既定の場所が2つあるのは、導入の scope で行き先が変わるためである。利用者ごとに入れると
+    %LOCALAPPDATA%\\Programs\\R、機械に入れると %ProgramFiles%\\R に置かれる。片方しか見ないと、
+    もう片方で入れた端末では PATH に通っていない限り見つからない。
     """
-    p = os.path.join(os.environ.get('LOCALAPPDATA', ''),
-                     'Programs', 'R', 'R-4.6.1', 'bin', 'Rscript.exe')
-    if os.path.isfile(p):
-        return p
+    cands = [os.path.join(os.environ.get('LOCALAPPDATA', ''),
+                          'Programs', 'R', 'R-4.6.1', 'bin', 'Rscript.exe'),
+             os.path.join(os.environ.get('ProgramFiles', r'C:\Program Files'),
+                          'R', 'R-4.6.1', 'bin', 'Rscript.exe')]
+    for p in cands:
+        if os.path.isfile(p):
+            return p
     found = shutil.which('Rscript')
     if found:
         return found
-    raise SystemExit('Rscript が見つかりません: %s' % p)
+    raise SystemExit('Rscript が見つかりません: %s' % ' / '.join(cands))
 
 
 def log_encoding(encoding):
