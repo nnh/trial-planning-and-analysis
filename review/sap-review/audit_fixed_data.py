@@ -75,7 +75,14 @@ SUBJECT_KEYS = ("USUBJID", "SUBJID", "SUBJECTID")
 KEY_EXCLUDED_SUFFIXES = ("SEQ", "DY")
 
 # 突合のキーの候補。被験者の識別子に続けて、内容を表す項目を足す。
-KEY_SUFFIX_CANDIDATES = ("SPID", "TESTCD", "TERM", "TRT", "CAT", "LNKID")
+# 判定を表す変数はキーに入れない（下の diff_key）。TERM はかつて候補だったが、
+# DSTERM のように判定変数でもあるため、変わった行が別の行として数えられていた。
+KEY_SUFFIX_CANDIDATES = ("SPID", "TESTCD", "TRT", "CAT", "LNKID")
+
+# 実行時の設定。既定は「直さない・直下だけ見る」で、緩めるときは引数で明示する。
+ALLOW_RAGGED = False
+RECURSIVE = False
+RAGGED_FIXED = []
 KEY_PLAIN_CANDIDATES = ("VISITNUM", "VISIT")
 
 # 空白・判定不能を表す値。集計から静かに外れる、または 0 件で通る素地になる。
@@ -148,6 +155,26 @@ def read_csv(path, encoding):
             "疑いがある。--encoding で指定し直す" % (path, encoding, e.reason))
     header = [h.strip().upper() for h in header]
     width = len(header)
+
+    dupes = sorted({h for h in header if header.count(h) > 1})
+    if dupes:
+        raise Unreadable(
+            "%s のヘッダに同じ列名が複数ある: %s。どちらの列を読むかが決まらない"
+            % (path, "・".join(dupes)))
+
+    # 列数の合わない行は直さずに拒否する。余りを捨てると自由記述の中のカンマで
+    # 列がずれた受領物を、切り詰めた別の表として検査してしまう。足りない分を空欄で
+    # 埋めると、落ちた列が「値なし」として集計に入る。どちらも受領物の構造不良を
+    # 検出せずに通す。受領仕様が末尾の欠落を許すときだけ --allow-ragged で明示する。
+    bad = [(i, len(r)) for i, r in enumerate(rows, start=2) if len(r) != width]
+    if bad and not ALLOW_RAGGED:
+        i, n = bad[0]
+        raise Unreadable(
+            "%s の列数が合わない（%d 行）。最初は %d 行目で、ヘッダ %d 列に対して "
+            "%d 列。引用符の欠落で自由記述のカンマが列区切りになっていないかを見る。"
+            "受領仕様が末尾の欠落を許すなら --allow-ragged を付ける"
+            % (path, len(bad), i, width, n))
+
     fixed = []
     for r in rows:
         if len(r) < width:
@@ -155,6 +182,8 @@ def read_csv(path, encoding):
         elif len(r) > width:
             r = r[:width]
         fixed.append(["" if v is None else str(v) for v in r])
+    if bad:
+        RAGGED_FIXED.append((path, len(bad)))
     return header, fixed
 
 
@@ -196,19 +225,38 @@ def domain_of(header, rows, path):
 
 
 def load_dir(path, encoding):
-    """ディレクトリ配下のデータを読む。読めなければ Unreadable を投げる。"""
+    """ディレクトリ直下のデータを読む。読めなければ Unreadable を投げる。
+
+    既定で直下だけを見る。手順は受領カットを版別フォルダへ保管し、解析が使う版だけを
+    直下へ置く。配下まで辿ると、保管した旧版の同じドメインも一緒に読み、解析が使う版と
+    検査が見る版が別になる。配布形式の都合で階層を持つ受領物は --recursive で明示する。
+    """
     if not os.path.isdir(path):
         raise Unreadable("ディレクトリがない: %s" % path)
     files = []
-    for root, _dirs, names in os.walk(path):
-        for n in sorted(names):
+    if RECURSIVE:
+        for root, _dirs, names in os.walk(path):
+            for n in sorted(names):
+                ext = os.path.splitext(n)[1].lower()
+                if ext in (".csv", ".json", ".xpt"):
+                    files.append(os.path.join(root, n))
+    else:
+        for n in sorted(os.listdir(path)):
+            full = os.path.join(path, n)
             ext = os.path.splitext(n)[1].lower()
-            if ext in (".csv", ".json", ".xpt"):
-                files.append(os.path.join(root, n))
+            if os.path.isfile(full) and ext in (".csv", ".json", ".xpt"):
+                files.append(full)
     if not files:
+        sub_dirs = [n for n in sorted(os.listdir(path))
+                    if os.path.isdir(os.path.join(path, n))]
+        hint = ""
+        if sub_dirs and not RECURSIVE:
+            hint = ("。直下だけを見ている。配下の %s に入っているなら、"
+                    "解析が使う版を直下へ置くか --recursive を付ける"
+                    % "・".join(sub_dirs[:5]))
         raise Unreadable(
             "%s に CSV・Dataset-JSON・XPT がない。拡張子で探しているので、"
-            "別の拡張子で置かれていないかを見る" % path)
+            "別の拡張子で置かれていないかを見る%s" % (path, hint))
 
     datasets = []
     for p in sorted(files):
@@ -225,6 +273,23 @@ def load_dir(path, encoding):
     if not datasets:
         raise Unreadable("%s から読めた表が 0 件だった" % path)
     return datasets
+
+
+def by_domain(datasets, path):
+    """ドメイン名で引ける形にする。同名が2つあれば止める。
+
+    辞書に詰め直すと後から読んだ方が黙って残る。保管した旧版が混ざったとき、
+    解析が使う版と検査が見る版が別になったことに気づけない。
+    """
+    out = {}
+    for d in datasets:
+        if d.domain in out:
+            raise Unreadable(
+                "%s に同じドメイン %s の表が 2 つある（%s と %s）。どちらを使うかが"
+                "決まらない。解析が使う版だけを置く"
+                % (path, d.domain, out[d.domain].source, d.source))
+        out[d.domain] = d
+    return out
 
 
 def load_expect(path):
@@ -482,12 +547,20 @@ def rule_occur_dates(datasets):
 
 
 def diff_key(ds):
-    """突合のキーを選ぶ。--SEQ は固定時に振り直されるので使わない（4.4）。"""
+    """突合のキーを選ぶ。
+
+    --SEQ は固定時に振り直されるので使わない（4.4）。判定を表す変数も使わない。
+    キーに入れると、その値が変わった行が別の行になり、追加1・削除1として数えられて、
+    判定の変化として出てこない。DSTERM のようにキー候補と判定変数の両方に当たる
+    変数がこれに当たる。変わりうる値を突合の軸にしない。
+    """
     key = []
     subj = ds.subject_key()
     if subj:
         key.append(subj)
     for suf in KEY_SUFFIX_CANDIDATES:
+        if suf in DECISION_SUFFIXES:
+            continue
         name = ds.suffix(suf)
         if name and name not in key:
             key.append(name)
@@ -515,8 +588,8 @@ def is_decision(ds, var):
 
 
 def run_diff(before, after, encoding, max_shown):
-    b = {d.domain: d for d in load_dir(before, encoding)}
-    a = {d.domain: d for d in load_dir(after, encoding)}
+    b = by_domain(load_dir(before, encoding), before)
+    a = by_domain(load_dir(after, encoding), after)
     lines = []
     lines.append("固定前: %s（ドメイン %d・レコード %d）" %
                  (before, len(b), sum(len(d.rows) for d in b.values())))
@@ -534,15 +607,23 @@ def run_diff(before, after, encoding, max_shown):
         lines.append("")
 
     changed_decision = []
+    # 判定への影響を確かめられなかったもの。0 件でないなら「変化なし」とは返せない
+    unverified = []
+    for dom in only_b:
+        unverified.append("%s  固定後に無い。判定への影響は未評価" % dom)
+    for dom in only_a:
+        unverified.append("%s  固定前に無い。判定への影響は未評価" % dom)
     for dom in sorted(set(a) & set(b)):
         da, db = a[dom], b[dom]
         key = diff_key(db)
+        key = [k for k in key if k in da.columns]
         if not key:
             lines.append("## %s  突合のキーが決まらないので件数だけ出す"
                          "（固定前 %d → 固定後 %d）" %
                          (dom, len(db.rows), len(da.rows)))
+            unverified.append("%s  突合のキーが決まらない。行ごとの照合ができていない"
+                              % dom)
             continue
-        key = [k for k in key if k in da.columns]
         ra, seen_a = keyed_rows(da, key)
         rb, seen_b = keyed_rows(db, key)
 
@@ -553,6 +634,15 @@ def run_diff(before, after, encoding, max_shown):
         cols = [c for c in db.columns
                 if c in da.columns
                 and not any(c.endswith(s) for s in KEY_EXCLUDED_SUFFIXES)]
+        # 片側にしかない列は値の比較に入らない。判定を表す列なら未評価として残す
+        for c in sorted(set(db.columns) - set(da.columns)):
+            if is_decision(db, c):
+                unverified.append("%s.%s  固定後に列が無い。判定への影響は未評価"
+                                  % (dom, c))
+        for c in sorted(set(da.columns) - set(db.columns)):
+            if is_decision(da, c):
+                unverified.append("%s.%s  固定前に列が無い。判定への影響は未評価"
+                                  % (dom, c))
         per_var = collections.Counter()
         transitions = collections.defaultdict(collections.Counter)
         changed_rows = set()
@@ -578,6 +668,11 @@ def run_diff(before, after, encoding, max_shown):
         if dupes:
             lines.append("  キーが一意でない組が %d 件ある。出現順で対応付けた"
                          "ので、内容変更の件数は上限値として読む" % dupes)
+            unverified.append("%s  キーが一意でない組が %d 件。行の対応が確定して"
+                              "いない" % (dom, dupes))
+        if added or removed:
+            unverified.append("%s  行が増減した（追加 %d・削除 %d）。判定への影響は"
+                              "未評価" % (dom, len(added), len(removed)))
         for c, n in sorted(per_var.items(), key=lambda x: (-x[1], x[0]))[:max_shown]:
             mark = " ← 判定を表す変数" if is_decision(db, c) else ""
             lines.append("  %s: %d 件変更%s" % (c, n, mark))
@@ -590,12 +685,22 @@ def run_diff(before, after, encoding, max_shown):
     lines.append("## 判定を表す変数の変化")
     if changed_decision:
         lines.extend("  " + s for s in changed_decision)
+    else:
+        lines.append("  なし。")
+
+    lines.append("")
+    lines.append("## 判定への影響を確かめられなかったもの")
+    if unverified:
+        lines.extend("  " + s for s in unverified)
+    else:
+        lines.append("  なし。")
+
+    if changed_decision or unverified:
         lines.append("")
         lines.append("  イベント判定が変わりうる。電子症例報告書のクエリ記録を"
                      "取り寄せて経緯を確認する（data-verification.md 4.4）。")
-    else:
-        lines.append("  なし。")
-    return lines, bool(changed_decision)
+        lines.append("  未評価が残っている間は「変化なし」とは読まない。")
+    return lines, bool(changed_decision or unverified)
 
 
 # ---------------------------------------------------------------- 出力
@@ -666,7 +771,16 @@ def main():
     p.add_argument("--severity", choices=SEVERITIES, default="info",
                    help="この深刻度までを出す（既定 info＝全部）")
     p.add_argument("--format", choices=("text", "tsv"), default="text")
+    p.add_argument("--allow-ragged", action="store_true",
+                   help="列数の合わない行を拒否せず、末尾を埋めるか切り詰める"
+                        "（受領仕様が末尾の欠落を許す場合だけ）")
+    p.add_argument("--recursive", action="store_true",
+                   help="ディレクトリの配下まで辿る（既定は直下だけ）")
     a = p.parse_args()
+
+    global ALLOW_RAGGED, RECURSIVE
+    ALLOW_RAGGED = a.allow_ragged
+    RECURSIVE = a.recursive
 
     try:
         if a.mode == "inventory":

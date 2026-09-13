@@ -42,6 +42,12 @@
 # 混ぜたまま突合が「不一致0」で通る（C3-127）。段階ごとの記録は Box の
 # output/qc/release-manifest.json に置く（成果物と同じで git 管理外）。
 #
+# 確かめるのはコミットと成果物のハッシュだけではない。受領データ直下の指紋も記録し、
+# 前の回と違えば再利用させない。コミットが同じままでも受領データは差し替わる（再抽出）。
+# 指紋が無いと、記録した成果物さえ据え置けば別のカットの層を混ぜられる。
+# また、ある段階を回し直したら、それより後の段階の成功記録は捨てる。残すと、途中で
+# 落ちた回でも以前の後続段階が「同じ回に通った」ものとして再利用される。
+#
 # 終了コード 0 全段階が通った / 1 どこかで落ちた
 import argparse
 import hashlib
@@ -79,13 +85,50 @@ def now():
 # 段階が作る成果物のうち、後ろの段階が材料として読むもの。ここが前の回と入れ替わって
 # いると、層をまたぐ突合が別々の回の材料を比べることになる。段階3以降は後続が読む
 # 材料を作らないので、記録するのは実施したことだけにする
+# パスは要素で持つ。区切りを文字列に書くと、書いた側の処理系でしか解決しない
+# （macOS ではバックスラッシュがファイル名の一部になり、成果物を見つけられない）。
+# 記録の鍵は / で綴り、読むときに区切りを揃える。
 STEP_ARTIFACTS = {
-    1: [r'datasets\sas\ard\ard_cards.csv',
-        r'output\compare\tlf_cells_sas_ja.csv', r'output\compare\tlf_cells_sas_en.csv'],
-    2: [r'datasets\r\ard\ard_cards_r.csv',
-        r'output\compare\tlf_cells_r_ja.csv', r'output\compare\tlf_cells_r_en.csv',
-        r'output\compare\tlf_cells_rsas_ja.csv', r'output\compare\tlf_cells_rsas_en.csv'],
+    1: [('datasets', 'sas', 'ard', 'ard_cards.csv'),
+        ('output', 'compare', 'tlf_cells_sas_ja.csv'),
+        ('output', 'compare', 'tlf_cells_sas_en.csv')],
+    2: [('datasets', 'r', 'ard', 'ard_cards_r.csv'),
+        ('output', 'compare', 'tlf_cells_r_ja.csv'),
+        ('output', 'compare', 'tlf_cells_r_en.csv'),
+        ('output', 'compare', 'tlf_cells_rsas_ja.csv'),
+        ('output', 'compare', 'tlf_cells_rsas_en.csv')],
 }
+
+# 受領データの置き場。解析が読むのは直下だけ（data-verification.md 4.9）
+INPUT_PARTS = ('input', 'rawdata')
+
+
+def rel_key(parts):
+    """記録の鍵。処理系によらず / で綴る。"""
+    return '/'.join(parts)
+
+
+def norm_key(key):
+    """記録から読んだ鍵の区切りを揃える。旧い記録は \\ で綴られている。"""
+    return key.replace(chr(92), '/')
+
+
+def input_digest(box):
+    """受領データ直下の指紋。名前とハッシュを並べて1つにまとめる。
+
+    これを持たないと、同じコミットのまま受領データを差し替えても、記録した成果物さえ
+    据え置けば再開の検査が通る。層の材料が入れ替わったことに気づけない。
+    """
+    d = os.path.join(box, *INPUT_PARTS)
+    if not os.path.isdir(d):
+        return ''
+    h = hashlib.sha256()
+    for n in sorted(os.listdir(d)):
+        f = os.path.join(d, n)
+        if os.path.isfile(f):
+            h.update(n.encode('utf-8'))
+            h.update(sha256(f).encode('ascii'))
+    return h.hexdigest()
 
 
 class Release:
@@ -111,12 +154,17 @@ class Release:
         # 再開の検査を通してしまう
         if m and m.get('commit') == self.commit and m.get('steps'):
             steps.update(m['steps'])
+        # 上流を回し直したら、下流の成功記録は無効にする。残すと、途中で落ちた回でも
+        # 以前の後続段階が「同じ回に通った」ものとして再利用される
+        for later in [k for k in steps if k.isdigit() and int(k) > no]:
+            del steps[later]
         h = {}
-        for rel in STEP_ARTIFACTS.get(no, []):
-            f = os.path.join(self.box, rel)
-            h[rel] = sha256(f) if os.path.isfile(f) else ''
+        for parts in STEP_ARTIFACTS.get(no, []):
+            f = os.path.join(self.box, *parts)
+            h[rel_key(parts)] = sha256(f) if os.path.isfile(f) else ''
         steps[str(no)] = {'at': now(), 'artifacts': h}
-        obj = {'commit': self.commit, 'dirty': self.dirty, 'at': now(), 'steps': steps}
+        obj = {'commit': self.commit, 'dirty': self.dirty, 'at': now(),
+               'input': input_digest(self.box), 'steps': steps}
         os.makedirs(os.path.dirname(self.manifest), exist_ok=True)
         text = json.dumps(obj, ensure_ascii=False, indent=2)
         with open(self.manifest, 'w', encoding='utf-8', newline='\r\n') as f:
@@ -134,13 +182,20 @@ class Release:
             bad.append('前の回はコミット %s、今は %s' % (m.get('commit'), self.commit))
         if m.get('dirty') or self.dirty:
             bad.append('作業ツリーに未コミットの変更がある。どの版で作った成果物かを確かめられない')
+        now_input = input_digest(self.box)
+        if not m.get('input'):
+            bad.append('前の回の記録に受領データの指紋が無い。通しで回して記録を作り直す')
+        elif m.get('input') != now_input:
+            bad.append('受領データが前の回から変わっている。段を飛ばすと、別のカットで'
+                       '作った層が混ざる')
         for n in step_nos:
             s = (m.get('steps') or {}).get(str(n))
             if not s:
                 bad.append('[%d] を実施した記録が無い' % n)
                 continue
-            for rel, want in (s.get('artifacts') or {}).items():
-                f = os.path.join(self.box, rel)
+            for key, want in (s.get('artifacts') or {}).items():
+                rel = norm_key(key)
+                f = os.path.join(self.box, *rel.split('/'))
                 if not want:
                     bad.append('[%d] %s は前の回に作られていない' % (n, rel))
                     continue

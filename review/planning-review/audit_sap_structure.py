@@ -14,6 +14,14 @@
 
     python audit_sap_structure.py <文書> [--severity warning] [--format tsv]
 
+終了コード
+
+    0  error の指摘なし（warning・info は出ていてもよい）
+    1  error の指摘あり。工程の出口条件を満たさない
+    2  検査が走らなかった（入力が無い等）。件数を0と読まない
+
+--severity は表示を絞るだけで、終了コードは絞る前の error の件数で決まる。
+
 規則
 
     S01  目次と本文の見出しが一致しない         warning
@@ -464,9 +472,11 @@ def main() -> int:
     path = Path(a.path)
     if not path.is_file():
         print(f"エラー: ファイルがありません: {path}")
-        return 1
+        return 2
 
     lines, headings, toc_range, findings = audit(path)
+    # 終了コードは表示の絞り込みの前に決める。--severity で隠しても不適合は残る
+    code = 1 if any(x.severity == "error" for x in findings) else 0
 
     floor = SEVERITIES.index(a.severity)
     findings = [x for x in findings if SEVERITIES.index(x.severity) >= floor]
@@ -479,14 +489,14 @@ def main() -> int:
         print("rule\tseverity\tline\tmessage")
         for x in findings:
             print(f"{x.rule}\t{x.severity}\t{x.line}\t{x.message}")
-        return 0
+        return code
 
     toc = f"{toc_range[0] + 1}-{toc_range[1]} 行目" if toc_range else "検出せず"
     print(f"対象: {path}（{len(lines)} 行・見出し {len(headings)} 件・目次 {toc}）")
     print()
     if not findings:
         print("指摘はありません。構造の検査のみで、記述の内容は判定していません。")
-        return 0
+        return code
 
     by_rule = Counter(x.rule for x in findings)
     for x in findings:
@@ -494,7 +504,9 @@ def main() -> int:
     print()
     print(f"計 {len(findings)} 件（{'・'.join(f'{r} {n}' for r, n in sorted(by_rule.items()))}）")
     print("構造の検査のみです。0 件でも記述が正しいことにはなりません。")
-    return 0
+    if code:
+        print("error があるので終了コード 1 を返します。工程の出口条件を満たしません。")
+    return code
 
 
 if __name__ == "__main__":

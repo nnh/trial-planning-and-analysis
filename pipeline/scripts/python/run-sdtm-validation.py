@@ -175,7 +175,7 @@ def main():
 
     with open(out + '.json', encoding='utf-8') as f:
         j = json.load(f)
-    report(j, repo)
+    return report(j, repo)
 
 
 def report(j, repo):
@@ -199,47 +199,88 @@ def report(j, repo):
     # 2026-08-25 の docs 階層化でパスが取り残され、2026-08-29 まで気づけなかったため止める。
     disp_path = os.path.join(repo, 'docs', 'metadata', 'core-issue-disposition.csv')
     if not os.path.isfile(disp_path):
-        raise SystemExit('仕分け表が見つかりません: %s' % disp_path)
+        print('仕分け表が見つかりません: %s' % disp_path)
+        return 2
     disp = {}
     with open(disp_path, encoding='utf-8-sig', newline='') as f:
-        for row in csv.DictReader(f):
+        rdr = csv.DictReader(f)
+        if 'ds' not in (rdr.fieldnames or []):
+            print('仕分け表に ds 列がありません: %s' % disp_path)
+            print('  許容の対象データセットを書く列です。; 区切りで並べ、全ドメインに'
+                  '及ぶときだけ ALL と書きます。')
+            print('  列が無いまま通すと、あるドメインで許容した指摘が別ドメインの'
+                  '本当の欠陥まで飲み込みます。')
+            return 2
+        for row in rdr:
             disp[row['core_id']] = row
 
-    grp = {}
-    for it in j['Issue_Summary']:
-        g = grp.setdefault(it['core_id'], {'core_id': it['core_id'], 'issues': 0, 'ds': set()})
-        g['issues'] += it.get('issues') or 0
-        g['ds'].add(it.get('dataset') or '')
+    # 許容は core_id だけで結ばない。同じルールでも別のドメインの指摘は別に審査する。
+    # ルール単位で許容すると、あるドメインの形式的な指摘を known にした後、次のカットで
+    # 別ドメインに出た本当の欠陥が同じルールに当たって全件既知になる。
+    def allowed(core_id, ds, want):
+        r = disp.get(core_id)
+        if not r or (r.get('disposition') or '').strip() != want:
+            return False
+        tgt = {x.strip().upper()
+               for x in (r.get('ds') or '').replace(';', ',').split(',') if x.strip()}
+        # 対象を書いていない行は全件許容にしない。書き忘れを許容と読まない
+        return bool(tgt) and ('ALL' in tgt or ds in tgt)
+
     rows = []
-    for core_id, g in grp.items():
-        rows.append({'core_id': core_id, 'issues': g['issues'],
-                     'ds': ','.join(sorted(g['ds'])),
-                     'disp': disp[core_id]['disposition'] if core_id in disp else 'open',
-                     'status': stat.get(core_id)})
-    execerr = [r for r in rows if r['status'] == 'EXECUTION ERROR']
-    issue = [r for r in rows if r['status'] != 'EXECUTION ERROR']
-    known = sorted([r for r in issue if r['disp'] == 'known'],
-                   key=lambda r: -r['issues'])
-    rest = sorted([r for r in issue if r['disp'] != 'known'], key=lambda r: -r['issues'])
+    for it in j['Issue_Summary']:
+        core_id = it['core_id']
+        ds = (it.get('dataset') or '').upper()
+        key = (core_id, ds)
+        g = next((r for r in rows if (r['core_id'], r['ds']) == key), None)
+        if g is None:
+            g = {'core_id': core_id, 'ds': ds, 'issues': 0, 'status': stat.get(core_id)}
+            rows.append(g)
+        g['issues'] += it.get('issues') or 0
+    for r in rows:
+        if r['status'] == 'EXECUTION ERROR':
+            r['disp'] = 'execerr-ok' if allowed(r['core_id'], r['ds'], 'execerror-ok') else 'execerr'
+        else:
+            r['disp'] = 'known' if allowed(r['core_id'], r['ds'], 'known') else 'open'
+
+    execerr = [r for r in rows if r['disp'] == 'execerr']
+    execok = [r for r in rows if r['disp'] == 'execerr-ok']
+    known = sorted([r for r in rows if r['disp'] == 'known'], key=lambda r: -r['issues'])
+    rest = sorted([r for r in rows if r['disp'] == 'open'], key=lambda r: -r['issues'])
 
     print('')
-    print('既知として残すと決めた指摘 : %d ルール / %s 件'
+    print('既知として残すと決めた指摘 : %d 件（ルール×ドメイン）/ %s 件'
           % (len(known), format(sum(r['issues'] for r in known), ',d')))
     for k in known:
-        print('  %6d 件  %s  %s' % (k['issues'], k['core_id'], disp[k['core_id']]['note']))
+        print('  %6d 件  %s  [%s]  %s'
+              % (k['issues'], k['core_id'], k['ds'], disp[k['core_id']]['note']))
     print('')
-    print('仕分けの対象 : %d ルール / %s 件（件数順に15まで）'
+    print('未仕分け : %d 件（ルール×ドメイン）/ %s 件（件数順に15まで）'
           % (len(rest), format(sum(r['issues'] for r in rest), ',d')))
     for r in rest[:15]:
-        mark = ' ' if r['disp'] == 'open' else r['disp'][:1]
-        print('  %s %6d 件  %s  [%s]  %s'
-              % (mark, r['issues'], r['core_id'], r['ds'], rmsg.get(r['core_id'])))
+        print('  %6d 件  %s  [%s]  %s'
+              % (r['issues'], r['core_id'], r['ds'], rmsg.get(r['core_id'])))
+    if execok:
+        print('')
+        print('実行できなかったが承認済みのルール : %d 件' % len(execok))
+        for e in execok:
+            print('  %s  [%s]  %s'
+                  % (e['core_id'], e['ds'], disp[e['core_id']]['note']))
     if execerr:
         print('')
-        print('ルールが実行できなかったもの : %d ルール' % len(execerr))
+        print('ルールが実行できなかったもの（未承認） : %d 件' % len(execerr))
         for e in execerr:
             print('  %s  [%s]  %s' % (e['core_id'], e['ds'], rmsg.get(e['core_id'])))
 
+    print('')
+    if rest or execerr:
+        print('未仕分け %d 件・未承認の実行失敗 %d 件。工程の出口条件を満たしません。'
+              % (len(rest), len(execerr)))
+        print('  残すと決めたものは core-issue-disposition.csv へ、'
+              '対象データセットを ds 列に書いて1行ずつ足します。')
+        return 1
+    print('未仕分け 0 件・未承認の実行失敗 0 件。')
+    return 0
+
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

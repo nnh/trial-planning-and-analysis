@@ -58,7 +58,8 @@ def run(label, script, args):
     sys.stdout.write(r.stdout)
     if r.stderr.strip():
         sys.stderr.write(r.stderr)
-    print(f"\n  （終了コード {r.returncode}。0 でなければ検査は走っていないので件数を0と読まない）")
+    print(f"\n  （終了コード {r.returncode}。"
+          "0＝error なし、1＝error あり、2＝検査が走っていないので件数を0と読まない）")
     return r.returncode
 
 
@@ -93,7 +94,14 @@ def main() -> int:
     print(f"  図表案       {os.path.join(m, 'planning-review', 'checklist-tlf-shells.md')}")
     print(f"  統計解析計画書 {os.path.join(m, 'sap-review', 'checklist.md')}")
     print(f"  電子症例報告書 {os.path.join(m, 'ecrf-review', 'checklist.md')}")
-    return 1 if any(codes) else 0
+    # 2（走らなかった）は 1（走って不適合）より重い。検査の不在を合格と読ませない
+    if any(c not in (0, 1) for c in codes):
+        print("\n走らなかった検査があります。件数を0と読まないこと。")
+        return 2
+    if any(codes):
+        print("\nerror の指摘があります。工程の出口条件を満たしません。")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
