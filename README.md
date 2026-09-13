@@ -1,7 +1,7 @@
 # trial-planning-and-analysis
 
 作成日：2026-08-22
-改訂日：2026-08-29
+改訂日：2026-09-13
 
 Ptosh を入力とする臨床試験解析の枠組み。NHO・Ptosh の利用者が使える公開の資産にし、統計家の工数を最小にすることを目的とする。NHOで実施したある試験で実際に組み上げた解析の流れと、そこで見つかった欠陥から一般化した。
 
@@ -14,6 +14,8 @@ Ptosh を入力とする臨床試験解析の枠組み。NHO・Ptosh の利用�
 - [examples/](examples/README.md) — 部品をどう並べるかの見本。読んで書き換えるためのもので、実行しない
 - [findings/](findings/README.md) — 工程ごとの欠陥事例の蓄積
 - [trials/](trials/README.md) — 試験を1本通すごとに残す通過記録
+
+次の試験に入る前に片づけるものは [action-items.md](action-items.md) が持つ。
 
 層をまたぐ解析の生成・検査スクリプト本体（宣言駆動の図表描画、トレーサビリティ索引の生成など）は [pipeline/scripts/](pipeline/README.md#scripts) に置く。受領CSVからSDTM・ADaM・ARD・図表を作る試験固有の実装（疾患固有のエンドポイント計算ロジックを含む）は、複数試験を通して共通部分が見えてくるまで対象外とする。
 
