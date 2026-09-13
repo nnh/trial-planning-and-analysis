@@ -5,9 +5,7 @@
 
 ## 直近
 
-- [ ] 試験側の `trial.json` に `define` と `sap_pdf` の2鍵を足す。枠組みの `build-adam-define.py`・`build-pi-package.py` はこの2鍵を読むが、試験側は `trial_id`・`box_path`・`received_define` の3鍵しか持たない。試験側は `--originator` の直書きと `SAP_PDF_SRC` の定数で動いているので、枠組み側を戻すとそこで止まる。鍵の形は `templates/trial.json`
 - [ ] `review/README.md` に固定の工程を入れる。入口の3点セットの説明が立案の3つだけを挙げていて、固定の工程が揃ったことを反映していない。固定は手順と機械検査が `review/sap-review/`、蓄積が `findings/` と2つのディレクトリにまたがる点も書く
-- [ ] 試験側の `docs/metadata/mr-timepoint.csv` を `timepoint-map.csv` へ改名する。枠組みの読み手を雛形の名前に揃えたので、同期した試験側は名前を変えないと時点別の表示型が止まる。PhALL219 に該当ファイルがある
 
 ## 判断が要るもの
 
