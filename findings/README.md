@@ -1,7 +1,7 @@
 # 欠陥事例
 
 作成日：2026-08-22
-改訂日：2026-08-22
+改訂日：2026-09-13
 
 試験を1本通すたびに見つかった欠陥を、症状ではなく原因の型として残す蓄積。次の試験で同じ箇所を見るための実体であり、レビュー・解析のたびに追記する。
 
@@ -9,9 +9,12 @@
 
 - 立案（研究計画書・図表案） — [../review/planning-review/findings-log.md](../review/planning-review/findings-log.md)
 - 立案（電子症例報告書の構造定義） — [../review/ecrf-review/findings-log.md](../review/ecrf-review/findings-log.md)
-- 解析（固定データから納品まで） — [analysis-findings-log.md](analysis-findings-log.md)
+- 固定（固定データの検証と再抽出） — [data-verification-findings-log.md](data-verification-findings-log.md)
+- 解析と納品（固定データを受け取ってから納品まで） — [analysis-findings-log.md](analysis-findings-log.md)
 
-固定・納品の工程はまだ3点セット（手順・機械検査・蓄積）が揃っていないため、欠陥事例もまだ無い。揃った時点でこのディレクトリに追加する。
+立案の2つは3点セットがそれぞれのサブディレクトリで完結する（[../review/README.md](../review/README.md)）。固定は手順と機械検査が [../review/sap-review/](../review/sap-review/data-verification.md)、蓄積がここ、と2つのディレクトリにまたがる。手順は `data-verification.md`、機械検査は `audit_fixed_data.py` である。
+
+納品は独立した工程として3点セットを持たない。手順は [../pipeline/analysis-pipeline-plan.md](../pipeline/analysis-pipeline-plan.md) が持ち、専用の機械検査は無く、欠陥事例は `analysis-findings-log.md` の「納品と再現で壊れるもの」が持つ。納品より後の工程（総括報告書概要・追加解析の受け方）は枠組みにまだ無い（[../action-items.md](../action-items.md)）。
 
 ## 書き方
 
