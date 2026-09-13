@@ -22,6 +22,7 @@
 # 2026-09-05 に scripts/sas-common.ps1 から移した。移した理由と、移植の前後で振る舞いが
 # 同じであることの確かめ方は pipeline/analysis-pipeline-plan.md「実行できる形を Python と
 # R に限る」「別の処理系へ移すときの確かめ方」。
+import json
 import os
 import re
 import shutil
@@ -105,12 +106,25 @@ def r_version_key(name):
     return tuple(int(x) for x in m.groups(default='0')) if m else (0, 0, 0)
 
 
+def pinned_r_version():
+    """renv.lock が固定する R の版。読めなければ None。
+
+    版の正本は renv.lock ただ1つで、ここが持つのは読み方だけである。
+    """
+    try:
+        with open(os.path.join(REPO, 'renv.lock'), encoding='utf-8') as f:
+            return (json.load(f).get('R') or {}).get('Version')
+    except (OSError, ValueError):
+        return None
+
+
 def find_rscript():
     """Rscript の在処。端末ごとの導入の作法は setting-up-a-machine.md が持つ。
 
     版をここに書かない。書くと renv.lock と2箇所で持つことになり、R を上げた日に
-    黙って見つからなくなる。複数の版が入っている端末では新しい方を採るので、
-    renv.lock が固定する版と食い違うときは renv が復元のときに知らせる。
+    黙って見つからなくなる。renv.lock が固定する版が入っていればそれを使い、
+    入っていなければ新しい方で回して、違う版で回すことを画面に出す。黙って別の版で
+    回ると、気づくのは renv が復元で止まるときで、実行の手前ではない。
 
     導入先を先に見て PATH を後に見る。Windows で R の版を管理する道具（rig）は
     PATH に Rscript.BAT という shim を置くが、Windows の CreateProcess は
@@ -120,16 +134,31 @@ def find_rscript():
     既定の場所が2つあるのは、導入の scope で行き先が変わるためである。利用者ごとに入れると
     %LOCALAPPDATA%\\Programs\\R、機械に入れると %ProgramFiles%\\R に置かれる。片方しか見ないと、
     もう片方で入れた端末では PATH に通っていない限り見つからない。
+
+    探す形は Windows の導入先のものだけである。macOS は PATH の Rscript を使う。
+    版を1つだけ持つ運用で、shim を挟む道具も要らないためで、複数版を持たせる日が
+    来たら R.framework の Versions/ の形をここへ足す。
     """
     roots = [os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs', 'R'),
              os.path.join(os.environ.get('ProgramFiles', r'C:\Program Files'), 'R')]
+    installed = []
     for root in roots:
         if not os.path.isdir(root):
             continue
         for name in sorted(os.listdir(root), key=r_version_key, reverse=True):
             exe = os.path.join(root, name, 'bin', 'Rscript.exe')
             if os.path.isfile(exe):
-                return exe
+                installed.append((name, exe))
+    want = pinned_r_version()
+    if installed:
+        if want:
+            for name, exe in installed:
+                if name == 'R-' + want:
+                    return exe
+            sys.stderr.write(
+                'renv.lock が固定する R %s がこの端末にありません。%s で回します。\n'
+                % (want, installed[0][0]))
+        return installed[0][1]
     found = shutil.which('Rscript')
     if found and not found.lower().endswith(('.bat', '.cmd')):
         return found
