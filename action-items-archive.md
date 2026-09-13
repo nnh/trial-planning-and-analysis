@@ -14,3 +14,5 @@
 - [x] 新しい試験を始める手順を1本書く。`starting-a-new-trial.md`
 - [x] 蓄積の追記トリガーを配布元へ入れ直す。配布元は `saito-la/claude-toolkit` の `guides/SESSION-END.md` で、akiko-office ではなかった。Step 4b として入れ、正本がどちらかを toolkit の README に明記した
 - [x] 試験側との同期の遅れを取り戻す。Python 14本・R 2本・SAS 2本を置き換えた。`findings/README.md` の「固定・納品の欠陥事例はまだ無い」も直した
+- [x] `runcommon.find_rscript()` が選ぶ版と `renv.lock` の固定を突き合わせる。固定した版が端末に在ればそれを使い、無ければ新しい方で回して画面に出す。黙って別の版で回ると、気づくのは renv が復元で止まるときになる。探す形は Windows の導入先のものだけで、macOS は PATH の Rscript を使う（版を1つだけ持つ運用のため。境界は docstring に書いた）
+- [x] この枠組み自身に `.gitattributes` を置く。`* text=auto eol=lf` の1行のみ。枠組みの追跡ファイルはすべてテキスト（py・md・csv・sas・R・json・html）なので binary の指定は置かない。理由の正本は配る雛形 `templates/gitattributes` 側に残した。`git add --renormalize .` の差分は0件で、既存のファイルはもともと LF だった

@@ -1,0 +1,4 @@
+# 改行はリポジトリの中も作業ツリーも LF に揃える。eol=lf まで指定する理由は
+# templates/gitattributes が持つ（配る雛形の側が正本）。この枠組みはすべて
+# テキストなので、binary の指定は置かない。
+* text=auto eol=lf
