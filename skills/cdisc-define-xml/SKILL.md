@@ -91,11 +91,20 @@ CodeList に無い値）。
 量で決める。** 受領版が CodeList・Origin・Comment を持っているなら、それを捨てて新規生成
 するのは情報の損失になる。編集を続けて、層ごとに正本を決める。
 
+SDTM 層（受領 define.xml を編集する形）。
+
 - 変数の型・長さ・順序 … 実データ（SAS データセット / Dataset-JSON）
 - Role・Core・ラベル … SDTM IG（`export-sdtm-metadata.py` の CSV）
 - CodeList・Origin・Comment … 受領 define.xml。ただし SDTM 層で値を扱った変数は実データ
 - 値水準メタデータの `--TESTCD` … 実データ
 - 言語 … 英語のみ。日本語のラベルは別のカタログが持つ
+
+ADaM 層（変数マップから新規生成する形）は逆で、宣言が正本になる。
+
+- 変数のラベル・長さ・順序・`itemOID` … 変数マップ（`variable-map.csv`）
+- 実データ … 宣言と合っているかの照合先。宣言を書き換える入力にしない
+
+層で正本が違うのは、SDTM をこちらが作っていないためである。受領物が先にあるので、その持つ情報を宣言へ写し直すと写し損ないが情報の損失になる。ADaM はこちらが作るので宣言が先にあり、実データは宣言の結果にすぎない。実データから属性を採ると、宣言は毎回の実データの写しになり、実装を回せない端末では同じ define.xml を作れなくなる。理由は [analysis-pipeline-plan.md](../../pipeline/analysis-pipeline-plan.md)「変数の属性の正本を宣言に置く」が持つ。
 
 ADaM の define.xml は受領版が無いので新規生成になる。変数マップ（`origin`・`predecessor` を
 手で維持する CSV）と Dataset-JSON から作る。

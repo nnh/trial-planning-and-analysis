@@ -45,7 +45,7 @@
 ### 検査
 
 - `python/check-environment.py` — この端末で何が回せるか（処理系・SAS・CDISC CORE・スキル・枠組みの置き場）。試験のリポジトリが無くても動く。立ち上げの最初に回す
-- `python/check-decisions.py` — 決定の正本が1つに保たれているか（[analysis-pipeline-plan.md](analysis-pipeline-plan.md)「検査で守る」）
+- `python/check-decisions.py` — 決定の正本が1つに保たれているか、判断票（区分が未決の行）が状態を持つか（[analysis-pipeline-plan.md](analysis-pipeline-plan.md)「検査で守る」）。`--gate` は未決が残っていれば落とす
 - `python/check-review-ledger.py` — 独立レビューの台帳で、状態欄と各項の記録が食い違っていないか
 - `python/check-ars-tlf.py` — ReportingEvent と、実際に配る図表・ARD が同じものを指しているか
 - `python/check-tlf-index.py` — 図表の宣言

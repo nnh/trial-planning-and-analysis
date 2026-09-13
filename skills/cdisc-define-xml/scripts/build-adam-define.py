@@ -329,17 +329,33 @@ def build(a):
         ET.SubElement(leaf, Q(DEF, 'title')).text = f'{name.lower()}.{a.leaf_ext}'
 
     # ItemDef（変数）
-    missing, used_cl = [], set()
+    missing, used_cl, over = [], set(), []
     for name, _, cols, _ in datasets:
         for c in cols:
             it = ET.SubElement(mdv, Q(ODM, 'ItemDef'))
             it.set('OID', f'IT.{name}.{c["name"]}')
             it.set('Name', c['name'])
             it.set('DataType', DTYPE.get(c['dataType'], 'text'))
-            if c.get('length'):
-                it.set('Length', str(c['length']))
-            it.set('SASFieldName', c['name'])
             r = vm.get((name, c['name']))
+            # ADaM の属性は宣言が正本で、実データは照合先（analysis-pipeline-plan.md
+            # 「変数の属性の正本を宣言に置く」）。実データの最大長から採ると、宣言は
+            # 毎回の実データの写しになり、実装を回せない端末で同じ define.xml を作れない。
+            # 宣言が無い変数だけ実データの値へ落ちる。
+            declared = None
+            if r and str(r.get('length') or '').strip():
+                try:
+                    declared = int(str(r['length']).strip())
+                except ValueError:
+                    declared = None
+            actual = c.get('length')
+            use = declared or actual
+            if use:
+                it.set('Length', str(use))
+            # 宣言より実データが長ければ、宣言が値を保持できない。黙って実データへ
+            # 合わせず、宣言を直す対象として挙げる
+            if declared and actual and int(actual) > declared:
+                over.append(f'{name}.{c["name"]}（宣言 {declared} < 実データ {actual}）')
+            it.set('SASFieldName', c['name'])
             desc(it, (r.get('label_en') if r and r.get('label_en')
                       else c.get('label') or c['name']))
             cl = codelist_for(c, cl_exact, cl_pat)
@@ -359,6 +375,11 @@ def build(a):
                 desc(og, r['spec_ref'])
     if missing:
         print(f'variable-map に無い変数 {len(missing)} 件: ' + ', '.join(missing[:10]))
+    if over:
+        print(f'宣言長が実データより短い変数 {len(over)} 件: ' + ', '.join(over[:10]))
+        print('  宣言が値を保持できません。variable-map の length を直すこと'
+              '（実データへ合わせる形では宣言が正本になりません）')
+        raise SystemExit(1)
 
     # CodeList（Define-XML 2.0 は ItemDef の後に置く）
     for oid in [o for o in cls_def if o in used_cl]:

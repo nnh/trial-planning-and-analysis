@@ -19,4 +19,3 @@
 
 - [!] `pipeline/scripts/sas/export-sdtm-metadata.sas` を落とすかどうか。現行の経路では誰も読まない（define.xml の生成を実装系統から外した時点で、生成が読むのは受領 define.xml と `docs/metadata/` の宣言だけになった）。試験側は既に落としてある。落とすなら削除し、`pipeline/README.md` の該当行も消す
 - [!] `templates/timepoint-map.csv` に5列（`denom`・`ecphase`・`adslvar`・`subset`・`note`）を足すかどうか。試験側の実ファイルは雛形の7列に加えてこれらを持つ。足すなら `templates/README.md` に列の定義も書く
-- [!] 水準の表示名の正本を `label-catalog.csv` に一本化するかどうか。`analysis-grouping.csv` の `label` 列が同じ表示名を二重に持ち、`build-ars-json.py` は `label` 列を読んで空なら識別子へ落ちるので `label-catalog.csv` を引かない。一本化するなら `build-ars-json.py` の参照先を変える
