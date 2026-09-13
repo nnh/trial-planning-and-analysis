@@ -45,11 +45,9 @@ TRIAL=<新しい試験のリポジトリのパス>
 
 最初に、この端末で何が回せるかを見る。依存の不足はデータを作り始める前にまとめて出す。回せない工程があることは、後の段で1つずつ突き当たるより、着手の前に分かっている方がよい。
 
-この検査はスキル2つを必須として見るので、先に配置する。`trial-planning-review` は 4.5. で使い、`cdisc-define-xml` は後の ADaM の define.xml の生成が読む。片方だけ写すと、不足が分かるのは解析に入ってからになる。
+この検査はスキル2つを必須として見るので、先に配置する。`trial-planning-review` は 4.5. で使い、`cdisc-define-xml` は後の ADaM の define.xml の生成が読む。片方だけ写すと、不足が分かるのは解析に入ってからになる。配り方と、端末に要るものの入れ方は [setting-up-a-machine.md](setting-up-a-machine.md) が持つ。
 
 ```bash
-mkdir -p ~/.claude/skills
-cp -r "$FRAMEWORK"/skills/trial-planning-review "$FRAMEWORK"/skills/cdisc-define-xml ~/.claude/skills/
 export TRIAL_REVIEW_DIR="$FRAMEWORK/review"
 ```
 
@@ -65,7 +63,7 @@ python3 "$FRAMEWORK"/pipeline/scripts/python/check-environment.py
 ssh <実行機> "python3 <実行機側の枠組み>/pipeline/scripts/python/check-environment.py"
 ```
 
-実行機に枠組みを置いていないなら `check-environment.py` だけを写して回し、`枠組みの review/` の欠落は想定内として扱う。立案時レビューは手元の端末で回すためである。実行機で `python3` が実体に解決されることも、ここで併せて確かめる。処理系が名前だけ在って中身が無い端末では、この検査自体が何も出さないまま終了コード0を返す。
+実行機にも枠組みのクローンを置く（[setting-up-a-machine.md](setting-up-a-machine.md)「端末の役割」）。検査のファイルだけを写して回す形では、その端末は自分に何が足りないかを自分で答えられない。実行機で `python3` が実体に解決されることも、ここで併せて確かめる。処理系が名前だけ在って中身が無い端末では、この検査自体が何も出さないまま終了コード0を返す。
 
 統計解析責任者が、試験ごとに1つのリポジトリを作る。ディレクトリの形と、そう分ける理由は [pipeline/analysis-pipeline-plan.md](pipeline/analysis-pipeline-plan.md)「リポジトリ側の構成」が持つ。下のコマンドはその形を作るだけで、意図はそこを読む。
 

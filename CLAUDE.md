@@ -17,6 +17,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `pipeline/analysis-pipeline-plan.md` — 中心。層の定義、フォルダ構成、工程の入口・出口条件、人の介入点、設計の原則、内部検証、文書の階層と決定の正本。文書の書き方の規約（日付・見出し・識別子・改行）も「命名の規約と既定」が持つ
 - `starting-a-new-trial.md` — 新しい試験のリポジトリを起こし、固定データを受け取れる状態に立つまで
+- `setting-up-a-machine.md` — 枠組みを回す端末を1台立てる。macOS と Windows の入れ方、Windows でだけ起きること（ストアエイリアス・rig・バッチの shim）の理由。要るものの一覧は持たず、`check-environment.py` が正本
 - `pipeline/README.md` — スクリプトの一覧と役割、実行できる形を Python と R に限る規則、外部パッケージを足さない境界
 - `templates/README.md` — 機械可読な宣言の列の定義と、埋める順序
 - `review/README.md` — 立案時レビューと最終レビュー、3点セットの考え方
