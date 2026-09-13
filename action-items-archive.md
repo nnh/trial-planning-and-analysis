@@ -2,6 +2,9 @@
 
 ## 次の試験に入る前に片づけるもの
 
+- [x] `check-environment.py` が解析を回す端末の要件まで見るようにした。R のビルド道具・`jsonschema`・`playwright` の3項目を足し、SAS・CDISC CORE と同じ「回せない工程」として報告する。実行機でも回す段を `starting-a-new-trial.md` 4.1. へ書いた。5つのうち Python 本体がスタブの場合だけは、この検査自体がそのスタブで起動するため拾えないので、4.1. で人が確かめる項目として書いた
+- [x] `starting-a-new-trial.md` の順序の食い違いを直した。4.1. の環境検査がスキル2つを必須として見るのに、配置は 4.5. だったため、手順どおり上から進めると 4.1. で必ず終了コード1になっていた。スキルの配置を 4.1. へ前出しし、修正後に手元の端末で通して終了コード0を確認した
+- [x] 着手に要る情報を `starting-a-new-trial.md` の「適用範囲と着手の条件」に明示した。渡すのは試験の識別子・データの置き場・研究計画書の草案・統計解析計画書の草案の4つで、`trial.json` の残る鍵がどの段で埋まるかも併記した
 - [x] 実行の形を `pipeline/scripts/` へ持ち込む。Python 19本と `r/build-define-html.R` を入れ、`pipeline/scripts/powershell/` の6本を落とした。入口と一覧は `pipeline/README.md`「scripts/」
 - [x] 検査スクリプトを `pipeline/scripts/python/` へ足す。7本を持ち込んだ。8本目に数えていた ADaM の論理検証は SAS 側の QC プログラムにあり、判定条件が疾患と研究計画書で変わるため汎用層は段の置き場と停止条件の形だけを持つ（`pipeline/README.md`「試験ごとに書き換えるもの」）
 - [x] 宣言の雛形を `templates/` へ足す。17件。18件としていたのは `codelist-decode.csv` を SDTM と ADaM で二重に数えていたため。列の定義は `templates/README.md`
