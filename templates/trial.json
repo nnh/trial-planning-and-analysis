@@ -1,4 +1,15 @@
 {
   "trial_id": "<試験ID>",
-  "box_path": ["Stat", "Trials", "<グループ>", "<試験ID>"]
+  "box_path": ["Stat", "Trials", "<グループ>", "<試験ID>"],
+  "received_define": [],
+  "define": {
+    "study_description": "",
+    "protocol_name": "",
+    "originator": ""
+  },
+  "sap_pdf": {
+    "path": [],
+    "fixed": "",
+    "box_account": ""
+  }
 }
