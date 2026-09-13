@@ -150,7 +150,7 @@ SAS の描画・R の描画・トレーサビリティ索引の生成の3つが�
 
 主要評価項目・解析対象集団の条件・図表ごとの期待の3本。置き場は `docs/validation/acceptance/` で、`docs/metadata/` とは分ける。`metadata/` が持つのは実装が動くために要る定義、`acceptance/` が持つのは実装を見ずに一次文書から起こした「こうあるべき」である。実装から起こすと実装の誤りがそのまま基準になり、二重コーディングの両系統が同じ誤りを共有したときに突合が通ってしまう。
 
-この3本がそろっていることは区間0の出口条件に含まれる（[../pipeline/analysis-pipeline-plan.md](../pipeline/analysis-pipeline-plan.md)「区間0 開始前の確定」）。出口条件の本文はそこが持つので、ここへ写さない。
+この3本がそろっていることは区間1の出口条件に含まれる（[../pipeline/analysis-pipeline-plan.md](../pipeline/analysis-pipeline-plan.md)「区間1 開始前の確定」）。出口条件の本文はそこが持つので、ここへ写さない。
 
 ### primary-endpoint.csv
 
@@ -405,7 +405,7 @@ ADaM の定義文書が使うコードリスト。ADaM には受領した定義�
 
 1. 雛形をコピーする。受入基準の3本は `docs/validation/acceptance/`、残りは `docs/metadata/` へ置く。`timepoint-map.csv` は試験で使う名前に合わせてよい
 2. `trial.json` の2つの値を埋める
-3. 区間0で決め切る事項を受入基準へ落とす。`analysis-set-condition.csv` に集団の条件と期待例数、`primary-endpoint.csv` に主要評価項目の判定、`display-contract.csv` に図表ごとの期待を書く。3本とも実装を見ずに一次文書から起こす。この3本を先にするのは、後の工程がここを基準に照合するためで、実装ができてから書くと基準が実装の写しになる
+3. 区間1で決め切る事項を受入基準へ落とす。`analysis-set-condition.csv` に集団の条件と期待例数、`primary-endpoint.csv` に主要評価項目の判定、`display-contract.csv` に図表ごとの期待を書く。3本とも実装を見ずに一次文書から起こす。この3本を先にするのは、後の工程がここを基準に照合するためで、実装ができてから書くと基準が実装の写しになる
 4. 図表案が固まったら `tlf-index.csv` と `label-catalog.csv` を書き起こし、事前規定の水準を `level-sets.csv` へ、結果を分ける軸を `analysis-grouping.csv` へ宣言する。図表案のレビュー（[../review/planning-review/checklist-tlf-shells.md](../review/planning-review/checklist-tlf-shells.md)）を通してから書くと、後から並び順や分母で戻らない
 5. 解析メタデータの3本（`analysis-purpose.csv`・`method-code.csv`・`reference-documents.csv`）を埋める。目的と計画時期と参照文書は一次文書から起こし、手法の実装は系統ができた時点で足す
 6. 症例報告書の構造定義がそろったら `crf-field-map.csv` と `crf-option-map.csv` を生成する。この2本は手で書かない

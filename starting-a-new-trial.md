@@ -13,7 +13,7 @@
 
 着手できるのは、研究計画書と統計解析計画書の草案があり、試験の識別子とデータの置き場が決まった時点である。図表案・電子症例報告書の構造定義・受領 define.xml は 4.5. までにそろえばよい。
 
-この手順を終えた状態が、[pipeline/analysis-pipeline-plan.md](pipeline/analysis-pipeline-plan.md)「区間0 開始前の確定」の出口にあたる。区間1 以降はそこが持つ。
+この手順を終えた状態が、[pipeline/analysis-pipeline-plan.md](pipeline/analysis-pipeline-plan.md)「区間1 開始前の確定」の出口にあたる。区間2 以降はそこが持つ。
 
 ## 3. 役割と責任
 
@@ -134,7 +134,7 @@ cp -r "$FRAMEWORK"/skills/trial-planning-review ~/.claude/skills/
 
 ### 4.7. 立ち上げの確認
 
-統計解析責任者が、区間0の出口条件を満たしたことを確かめる。条件は [pipeline/analysis-pipeline-plan.md](pipeline/analysis-pipeline-plan.md)「区間0 開始前の確定」が持つ。
+統計解析責任者が、区間1の出口条件を満たしたことを確かめる。条件は [pipeline/analysis-pipeline-plan.md](pipeline/analysis-pipeline-plan.md)「区間1 開始前の確定」が持つ。
 
 あわせて次を見る。
 
