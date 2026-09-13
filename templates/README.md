@@ -397,6 +397,17 @@ ADaM の定義文書が使うコードリスト。ADaM には受領した定義�
 
 指摘の本文と件数はこのファイルへ写さない。持つのは識別子と、残すという判断だけである。
 
+## received-values.csv
+
+受領データに現れてよい値の宣言。固定データの検証（`audit_fixed_data.py --expect`）が読む。
+
+- `domain` — ドメイン名
+- `variable` — 変数名
+- `value` — その変数が取りうる値。1行1値
+- `note` — 出どころ
+
+宣言に無い値が実データにあれば、規定の隙間に落ちる症例か、収集の設計と実装の食い違いである。どちらも固定の直後に見つけたい。解析の終盤で見つけると、データセンターへの照会が間に合わない。
+
 ## release-artifacts.csv
 
 通し実行の段ごとに、その段が作る成果物のうち試験側にしか名前が分からないものの宣言。`run-release.py` が読む。
@@ -448,8 +459,10 @@ ADaM の定義文書が使うコードリスト。ADaM には受領した定義�
 5. 解析メタデータの3本（`analysis-purpose.csv`・`method-code.csv`・`reference-documents.csv`）を埋める。目的と計画時期と参照文書は一次文書から起こし、手法の実装は系統ができた時点で足す
 6. 症例報告書の構造定義がそろったら `crf-field-map.csv` と `crf-option-map.csv` を生成する。この2本は手で書かない
 7. `variable-map.csv` は層を作りながら埋める。SDTM の層では `sdtm_datasets.csv` と定義文書の宣言4本（`sdtm-value-level.csv`・`sdtm-codelist-values.csv`・`sdtm-codelist-mode.csv`・`codelist-decode.csv`）を、ADaM の層では `adam-codelist.csv` を合わせて埋める
-8. 適合性検証を回したら、直さずに残すと決めた指摘を `core-issue-disposition.csv` へ書く
-9. 参考併記の表を出す試験だけ、`reference-table-rows.csv` と `reference-values.csv` を埋める。出さない試験ではコピーしない
-10. 納品の問い合わせ先が決まったら `delivery-contact.csv` へ入れる
+8. 固定データを受け取ったら `received-manifest.csv` に現行の入力を並べ、`received-values.csv` に現れてよい値を宣言し、`diff-key.csv` にドメインごとの突合のキーを書く。再抽出のたびにマニフェストを書き直す
+9. 適合性検証を回したら、直さずに残すと決めた指摘を `core-issue-disposition.csv` へ書く。対象データセットを `ds` 列に書く
+10. 通し実行で段を飛ばす予定があるなら、`release-artifacts.csv` にその段の成果物を宣言する。枠組みが名前を知らない成果物（突合と視覚回帰の出力）は宣言が無いと再利用できない
+11. 参考併記の表を出す試験だけ、`reference-table-rows.csv` と `reference-values.csv` を埋める。出さない試験ではコピーしない
+12. 納品の問い合わせ先が決まったら `delivery-contact.csv` へ入れる
 
 雛形に中身を残さない。表題や水準の表示名を他の試験から流用すると、その試験の語彙が紛れ込む。
