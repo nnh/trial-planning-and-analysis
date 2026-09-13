@@ -22,6 +22,24 @@ TRIAL <- ap_trial_config()$trial_id
 tlf_listdata <- function(lblid) NULL
 
 ## ---------------------------------------------------------------------------------
+## 描画で作れなかったものの控え。図・SVG・Excel の失敗を警告に変えて進むと、外部から見た
+## 終了コードは 0 のままで、成果物が欠けたまま次の段階へ進む（C3-125）。ここに貯めて、
+## 呼び出し側（<試験ID>_TLF.R）が最後に非0で終えられるようにする。
+## 続ける形は残す。1件で止めると、残りに他の欠陥があっても1回の実行で1件しか分からない。
+## ---------------------------------------------------------------------------------
+.tlf_miss <- new.env(parent = emptyenv())
+.tlf_miss$msg <- character(0)
+
+tlf_miss <- function(fmt, ...) {
+  m <- sprintf(fmt, ...)
+  .tlf_miss$msg <- c(.tlf_miss$msg, m)
+  ap_note("WARN %s", m)
+  invisible(NULL)
+}
+
+tlf_miss_list <- function() .tlf_miss$msg
+
+## ---------------------------------------------------------------------------------
 ## 表示文言（label-catalog）。日本語版は label_ja、英語版は label_en を使う。
 ## カタログに無いキーは識別子をそのまま出す（SAS系と同じ振る舞い）。
 ## ---------------------------------------------------------------------------------
@@ -35,6 +53,14 @@ fx <- function(key) {
   v <- lab("fixed", key)
   if (nzchar(v)) v else key
 }
+
+## 図ごとに違う文言を引く。<key>_<図表ID> が登録されていればそれを、無ければ <key> を使う。
+## 生存曲線の横軸がこれにあたる。起算日が図によって違う（EFS・OS は登録日、RFS は LFS 到達日）
+## のに、既定の「登録からの期間」を全図で使っていた（C2-064。2026-08-30 に図を見て判明）
+fx_for <- function(key, lblid) {
+  v <- lab("fixed", paste0(key, "_", lblid))
+  if (nzchar(v)) v else fx(key)
+}
 lvl <- function(id) {                        # 水準・背景表の行項目の表示名
   if (is.na(id) || !nzchar(id)) return("")
   for (k in c("level", "bgitem")) {
@@ -42,6 +68,16 @@ lvl <- function(id) {                        # 水準・背景表の行項目の
     if (nzchar(v)) return(v)
   }
   id
+}
+## 表ごとに違う行ラベルを引く。<水準>_<図表ID> が登録されていればそれを、無ければ
+## 水準そのものの表示名を使う（固定文言の fx_for と同じ考え方）。同じ水準でも表に
+## よって説明を変えたいときの口で、表5.4.3 の MTF・MolPD・MolR がこれにあたる。
+## 5.4.3 では全観察期間の状態とイベントを表す行だが、5.4.3.1 では評価時点ごとの列に
+## なるため、水準そのものの名前を変えるわけにいかない（C2-039。2026-08-30）
+lvl_for <- function(id, lblid) {
+  if (is.na(id) || !nzchar(id)) return("")
+  v <- lab("level", paste0(id, "_", lblid))
+  if (nzchar(v)) v else lvl(id)
 }
 ## 水準の並び順（label-catalog.csv の kind=level の order 列。SAS の _lvcat.LVORD と同じ）。
 ## 番号を入れていない水準は 9999 を返し、呼び出し側が識別子で並べる。表示名で並べると
@@ -65,6 +101,30 @@ lvvisit <- function(id) {
   if (is.na(v)) 99999L else v
 }
 
+## 事前規定の水準集合。正本は docs/metadata/level-sets.csv（C3-002。2026-09-03）。宣言表の
+## levels 列と表示型の既定値が同じ集合を書き写していたのをやめ、集合IDで指す形にした。
+## ここで使うのは表示の順（display_order。空の集合は impl_order）で、ARD 側が使う実装の
+## 列挙順とは別に持つ。2つを1つにすると図表の行順が変わる。CSV は1度だけ読む。
+LVSETS <- read_csv(ap_spec("level-sets.csv"), col_types = cols(.default = "c"),
+                   progress = FALSE, na = character())
+## 集合IDから表示順の水準を引く。集合が無ければ止める。既定の水準へ黙って落とすと、
+## 宣言が指した集合とは違う列が出たままになる
+lvsetd <- function(id) {
+  h <- LVSETS[LVSETS$set_id == id, ]
+  if (!nrow(h)) ap_stop("水準集合が docs/metadata/level-sets.csv に無い: %s", id)
+  io <- suppressWarnings(as.integer(h$impl_order))
+  dp <- suppressWarnings(as.integer(h$display_order))
+  dp[is.na(dp)] <- io[is.na(dp)]
+  h$level[ordc(dp, io)]
+}
+## 宣言の levels 列を水準の並びへ直す。LS_ で始まる値は水準集合の識別子なので展開し、
+## それ以外（%tab_crs のコース列のような部分集合の並び）は | で分ける
+lvsplit <- function(v) {
+  if (length(v) != 1 || is.na(v) || !nzchar(v)) return(character(0))
+  if (startsWith(v, "LS_")) return(lvsetd(v))
+  strsplit(v, "|", fixed = TRUE)[[1]]
+}
+
 ## ---------------------------------------------------------------------------------
 ## 数値の書式。SAS の put(x, 6.1) 等に合わせる。欠測は空にする
 ## （TLF.sas が options missing="" で走っているため）。
@@ -76,10 +136,47 @@ sasround <- function(x, d) {
   m <- 10 ^ d
   sign(x) * floor(abs(x) * m + 0.5) / m
 }
-f1 <- function(x) ifelse(is.na(x), "", formatC(sasround(x, 1), format = "f", digits = 1))
-f0 <- function(x) ifelse(is.na(x), "", formatC(sasround(x, 0), format = "f", digits = 0))
+f1 <- function(x) ifelse(is.na(x), "", formatC(sasround(x, 1), format = "f", digits = 1, big.mark = ","))
+f0 <- function(x) ifelse(is.na(x), "", formatC(sasround(x, 0), format = "f", digits = 0, big.mark = ","))
+
+## 例数と括弧の中身を組む。中身が空のときは括弧ごと落とす。「60 ()」のように空の括弧が
+## 残ると、割合が0なのか算出していないのかが読み手に分からない（C2-050）。SAS 側は
+## tlf_ops.sas の同じ箇所で ifc() を使って同じことをする
+np <- function(n, p) ifelse(is.na(p) | p == "", n, paste0(n, " (", p, ")"))
+## セルを作った ARD の行を指す鍵。解析ID・行の水準・列の群・統計量・セルに出た統計量の
+## 並び・鍵の読み方を | でつなぐ。空の要素があってもよい（列が統計量でない表では stat が
+## 空になる）。C2-068
+##
+## 前の4つは ARD の1行を一意に指す結合キーで、突合と索引が使う形を変えない。後ろの2つは
+## その1行だけではセルの値を説明できないときに、読み手が代表を単一の由来と読み違えない
+## ようにする（C3-103・C3-104）。
+##   stats … セルに実際に出た統計量の名前を + でつないだもの。1つしか出ないセルでは st と
+##           同じ。「19/20」なら n+N、「7.0 - 21.4」なら lcl+ucl のように、解析ID・水準・群を
+##           固定したうえで由来の ARD 行をすべて数え上げられる形にする
+##   kind  … 前の4つと stats で由来を数え上げられるなら空。数え上げられないときだけ印を置く。
+##           repr は同じ値を持つ複数行のうちバイト順で最小のものを代表に選んだ場合（分母 N）、
+##           part は解析・部分集合が違う行も値に入っていて鍵では名指しできない場合
+ky <- function(aid = "", vl = "", g1 = "", st = "", stats = st, kind = "")
+  paste(nz(aid), nz(vl), nz(g1), nz(st),
+        paste(nz(stats), collapse = "+"), nz(kind), sep = "|")
+## セルに実際に出た統計量の名前を並べる。引数の名前が ARD の stat_name、値が書式化した
+## あとの文字列で、空のものは表示から落ちているので鍵にも入れない（割合の無いセルが
+## 「60 ()」にならないのと同じ扱い）。C3-103
+shown <- function(...) { v <- c(...); names(v)[nzchar(v)] }
+## 鍵に入れる代表値を1つ選ぶ。分母（N）のように複数の水準にまたがって同じ値を持つ
+## 統計量は、セルの値がどの ARD 行から来たかを1行に決められない。バイト順で最小の
+## ものを代表にすると、両系統で同じ行を指す（SAS の min() も UTF-8 セッションでは
+## バイト順で比べる）。C2-068。代表を選んだセルは ky() の kind に repr を置き、
+## 台帳の読み手が単一の由来と読み違えないようにする（C3-104）
+minc <- function(v) {
+  v <- v[!is.na(v)]
+  if (!length(v)) "" else sort(unique(v), method = "radix")[1]
+}
+## 割合ではない併記は角括弧に入れる。丸括弧は割合の印なので、同じ形にすると
+## 読み手が区別できない（C2-053。SAS の %tab_prop_tp も同じ形にしてある）
+nb <- function(n, x) ifelse(is.na(x) | x == "", n, paste0(n, " [", x, "]"))
 ## 文字の並びを SAS の proc sort へ合わせる。SAS は UTF-8 セッションで動かすので
-## （scripts/sas-common.ps1）UTF-8 のバイト列で並び、R の method="radix" も同じ
+## （scripts/runcommon.py）UTF-8 のバイト列で並び、R の method="radix" も同じ
 ## UTF-8 バイト順なので、そのまま渡せば一致する。R の既定（LC_COLLATE に従う並び）は
 ## 記号と大小文字を無視して SAS と違うため使わない。
 ## 2026-08-21 まで SAS が CP932 セッションだったため、CP932 のバイト列へ直してから
@@ -108,9 +205,13 @@ stat_of <- function(d, name) {
   if (!length(v)) NA_real_ else max(v)
 }
 ## tlf-index の filter（GROUP1L='INDUCTION' の形）を ARD の列名へ写して絞る
+## 名前は SAS 側の ARD の列名（ard.ard）に合わせる。宣言の filter 列は両系統が同じ文字列を
+## 読むので、片方にしか無い名前を作らない。ANALYSID は1つの図表グループの一部だけを描く
+## ための軸で、表 5.4.2.4（Out-5.4.2 の連続量）が使う
 COLMAP <- c(GROUP1L = "group1_level", GROUP1 = "group1", SUBSET = "data_subset",
             VARIABLE = "variable", VARLEVEL = "variable_level",
-            ANALSET = "analysis_set", CONTEXT = "context")
+            ANALSET = "analysis_set", CONTEXT = "context",
+            ANALYSID = "analysis_id")
 apply_filter <- function(d, f) {
   if (is.na(f) || !nzchar(f)) return(d)
   for (part in strsplit(f, "\\s+and\\s+")[[1]]) {
@@ -133,7 +234,7 @@ apply_filter <- function(d, f) {
 ## ---------------------------------------------------------------------------------
 VM <- read_csv(ap_spec("variable-map.csv"), col_types = cols(.default = "c"),
                progress = FALSE, na = character())
-IX <- "../../deliver/r/traceability.html"  # output/tlf/r-<言語>/ から見たトレーサビリティ索引
+IX <- "../traceability.html"  # output/tlf/r-<言語>/ から見たトレーサビリティ索引
 adam_of <- function(item) {              # 解析項目 → ADaM の <データセット>.<変数>
   h <- VM[VM$layer == "adam" & VM$variable == item, ]
   if (nrow(h)) return(unique(paste0(h$dataset, ".", h$variable)))
@@ -163,7 +264,12 @@ paramcd_ds <- function(v) {
   .pcd[[v]]
 }
 an_of <- function(r) {                   # その図表を作っている解析
-  if (!is.na(r$analysis_id) && nzchar(r$analysis_id)) return(r$analysis_id)
+  ## 群別の件数を列として足した表は、その列の出どころも指す（2026-09-12。表 5.4.8 の
+  ## 因果関係の列が An-5.4.8-04 由来なのに案内が An-5.4.8-01 だけを指していた）
+  extra <- if (!is.null(r$grpcnt_id) && !is.na(r$grpcnt_id) && nzchar(r$grpcnt_id))
+             r$grpcnt_id else character(0)
+  if (!is.na(r$analysis_id) && nzchar(r$analysis_id))
+    return(unique(c(r$analysis_id, extra)))
   ## KM の図は解析IDを持たず ADTTE から曲線を描く。表番号が指す解析グループ
   ## （F_5_4_1 なら Out-5.4.1）で同じ PARAMCD を扱う解析を、同じ推定値として指す
   if ((is.na(r$output_id) || !nzchar(r$output_id)) &&
@@ -222,59 +328,260 @@ nav_html <- function(r) {
 d_tab_prop <- function(r) {
   d <- ARD[ARD$analysis_id == r$analysis_id & ARD$context == "categorical", ]
   if (!nrow(d)) return(NULL)
+  ## 宣言の grpcnt_id が指す解析の群ごとの件数（n）を列として右へ足す。列の並びは groups
+  ## （| 区切りの群の識別子）、見出しは labels（| 区切りの kind=fixed のキー）で、群の名前も
+  ## 見出しの文言も実装は持たない。表 5.4.8 が An-5.4.8-04（事象別の件数を試験治療との
+  ## 因果関係で分けたもの）をこの口で足す。SAS 側は %tab_prop の grpcnt_id= が同じ宣言を読む。
+  ## 引くのは件数だけにする。割合と信頼区間はその群の中での値で、行の列とは分母が違う
+  gid <- nz(r$grpcnt_id)
+  gs <- if (nzchar(gid)) strsplit(nz(r$groups), "\\|")[[1]] else character(0)
+  gl <- if (nzchar(gid)) strsplit(nz(r$labels), "\\|")[[1]] else character(0)
+  dg <- if (nzchar(gid))
+          ARD[ARD$analysis_id == gid & ARD$context == "categorical" &
+              ARD$stat_name == "n", ] else NULL
   g <- split(d, d$variable_level)
   rows <- lapply(names(g), function(k) {
     x <- g[[k]]
     n <- stat_of(x, "n"); N <- stat_of(x, "N"); p <- stat_of(x, "p")
     lo <- stat_of(x, "lcl"); hi <- stat_of(x, "ucl")
-    list(sort = -ifelse(is.na(n), -Inf, n),
-         cells = c(lvl(k), catx("/", f0(n), f0(N)), f1(p), catx(" - ", f1(lo), f1(hi))))
+    ## 群は宣言ではなく ARD の行が持つ（1解析1群だが GROUP1L は空とは限らない。
+    ## An-4.4.11-CHR-major は SUBTYPE='MAJOR' を持つ）。空を入れると鍵が ARD の
+    ## 行に当たらない（C2-068 の照合で判明）
+    g1 <- nz(x$group1_level[1])
+    ## 件数と分母、下限と上限は1つのセルに2つの統計量を並べたもの。鍵の統計量は先に出る
+    ## 方を残したまま、セルに出た統計量を stats で数え上げる（C3-103）
+    nc <- f0(n); Nc <- f0(N); pc <- f1(p); lc <- f1(lo); uc <- f1(hi)
+    ## 結果値の無い組合せはセルを空にし、鍵も空にする（ARD に無い行を指さない。
+    ## d_tab_prop_grp・d_tab_aegr と同じ扱いで、SAS の %tab_prop も同じ）
+    gv <- vapply(gs, function(gr) {
+      x2 <- dg[dg$variable_level == k & dg$group1_level == gr, ]
+      if (!nrow(x2)) "" else f0(stat_of(x2, "n"))
+    }, "", USE.NAMES = FALSE)
+    gk <- vapply(seq_along(gs), function(i)
+      if (nzchar(gv[i])) ky(gid, k, gs[i], "n") else "", "")
+    list(ord = lvord(k), sort = -ifelse(is.na(n), -Inf, n), id = k,
+         cells = c(lvl(k), catx("/", nc, Nc), pc, catx(" - ", lc, uc), gv),
+         keys = c("", ky(r$analysis_id, k, g1, "n", shown(n = nc, N = Nc)),
+                  ky(r$analysis_id, k, g1, "p"),
+                  ky(r$analysis_id, k, g1, "lcl", shown(lcl = lc, ucl = uc)), gk))
   })
-  rows <- rows[order(vapply(rows, function(x) x$sort, 0))]
-  list(cols = c(lab("rowlbl", r$lblid), fx("nden"), fx("prop"), fx("ci95")),
-       rows = lapply(rows, function(x) x$cells), note = "")
+  ## 並びは 宣言された定義順（label-catalog の order。lvord() は番号を持たない水準へ
+  ## 9999 を返すので、番号を持つ水準が先に来る）→ 件数の多い順 → 識別子。定義順を先に
+  ## 見るのは、判定の水準のように読み手が決まった並びを期待する表があるためで、番号を
+  ## 持つ水準は件数に関わらずその番号順に出る（C2-049。2026-09-10）。同点を識別子で割る
+  ## のは、表示名で並べると日英で行が入れ替わるためである（C2-213）。SAS 側は
+  ## tlf_ops.sas の %tab_prop が同じ3つの鍵（_lvord・descending _n・_vl）で並べる
+  rows <- rows[ordc(vapply(rows, function(x) x$ord, 0),
+                    vapply(rows, function(x) x$sort, 0),
+                    vapply(rows, function(x) x$id, ""))]
+  ## 分母の単位が表によって違う。表 5.4.8・5.4.8.1 は重篤な有害事象の件数を分母に
+  ## するので、列名も件数と書く（C2-057。fx_for が <key>_<図表ID> を先に引く）
+  list(cols = c(lab("rowlbl", r$lblid), fx_for("nden", r$lblid), fx("prop"), fx("ci95"),
+                vapply(gl, fx, "", USE.NAMES = FALSE)),
+       rows = lapply(rows, function(x) x$cells),
+       keys = lapply(rows, function(x) x$keys), note = build_note("", r))
 }
 
 d_tab_prop_grp <- function(r) {
   d <- ARD[ARD$analysis_id == r$analysis_id & ARD$context == "categorical", ]
   if (!nrow(d)) return(NULL)
   gs <- strsplit(r$groups, "\\|")[[1]]
-  ls <- strsplit(r$levels, "\\|")[[1]]
+  ls <- lvsplit(r$levels)
   cell <- function(gr, lv) {
     x <- d[d$group1_level == gr & d$variable_level == lv, ]
     if (!nrow(x)) return("")
-    paste0(f0(stat_of(x, "n")), " (", f1(stat_of(x, "p")), ")")
+    np(f0(stat_of(x, "n")), f1(stat_of(x, "p")))
   }
   head_row <- c(fx("nsubj"), vapply(gs, function(gr) {
     x <- d[d$group1_level == gr, ]
     if (!nrow(x)) "" else f0(stat_of(x, "N"))
   }, ""))
+  ## 対象症例数の行は、その群のすべての水準が持つ N の最大を出す。どの水準の行から
+  ## 来たかは決まらないので、水準はバイト順で最小のものを代表にする（C2-068）。
+  ## 代表であることは kind に repr を置いて台帳へ残す（C3-104）
+  nkey <- function(gr) {
+    v <- d[d$group1_level == gr & d$stat_name == "N" & !is.na(d$stat_num), ]
+    if (!nrow(v)) return("")
+    ky(r$analysis_id, minc(v$variable_level), gr, "N", kind = "repr")
+  }
+  ## 結果値の無い組合せはセルが空になる。鍵も空にする（ARD に無い行を指さない）。
+  ## 「n (p)」の形は2つの統計量を並べたものなので、出た方を stats で数え上げる（C3-103）
+  cellk <- function(gr, lv) {
+    x <- d[d$group1_level == gr & d$variable_level == lv, ]
+    if (!nrow(x)) return("")
+    ky(r$analysis_id, lv, gr, "n",
+       shown(n = f0(stat_of(x, "n")), p = f1(stat_of(x, "p"))))
+  }
   rows <- c(list(head_row),
             lapply(ls, function(lv) c(lvl(lv), vapply(gs, cell, "", lv = lv))))
-  list(cols = c(lab("rowlbl", r$lblid), vapply(gs, lvl, "")), rows = rows, note = "")
+  keys <- c(list(c("", vapply(gs, nkey, ""))),
+            lapply(ls, function(lv)
+              c("", vapply(gs, cellk, "", lv = lv))))
+  list(cols = c(lab("rowlbl", r$lblid), vapply(gs, lvl, "")), rows = rows, keys = keys,
+       note = build_note("", r))
 }
 
 ## 時点の並びは SAS と同じく VARLEVEL から数字を取り出して昇順にする（1年・2年・3年…）
 timept_order <- function(v) suppressWarnings(as.numeric(gsub("[^0-9.]", "", v)))
 
-## 注記の文言（label-catalog の note_km・note_cif）は SAS のマクロ変数を含む。
-## 例: "N=&_n, events=&_ev, censored=&_cn"。同じ値を ARD から入れて置き換える。
-subst_note <- function(txt, d) {
-  ## 長いキーから置き換える（&_ne を先に処理しないと &_n が食って "87e" になる）
-  v <- list("&_ev" = "nevent", "&_cn" = "ncensor", "&_ne" = "nevent",
-            "&_nc" = "ncompet", "&_n" = "N")
-  for (k in names(v)) {
-    if (grepl(k, txt, fixed = TRUE)) {
-      txt <- gsub(k, f0(stat_of(d, v[[k]])), txt, fixed = TRUE)
+## 注記の文言は印（&_n・&_dec など）を含む。例: "N=&_n, events=&_ev, censored=&_cn"。
+## 印の正本は label-catalog.csv の kind=notemark で、印の名前（key）と値の出どころ
+## （value_source）だけを持つ。印の一覧をここへ写さないので、印を1つ足せば宣言を読む
+## 両系統へ同時に届く（C3-202。SAS 系は %_nvset・%_fosub が同じ宣言を読む）。
+## 値の出どころは2種類。ard:<統計量名> はその図表の解析の ARD 行、pe:<名前> は主要評価
+## 項目の判定が作る値（prim_values の petp・peest…、SAS のマクロ変数 _petp・_peest…）
+note_marks <- function() {
+  m <- LC[LC$kind == "notemark", ]
+  if (!nrow(m)) return(character(0))
+  v <- setNames(nz(m$value_source), paste0("&", nz(m$key)))
+  ## 長い印から置き換える。&_n を先に処理すると &_nc が "87c" になるので、順序は
+  ## 名前の長さから機械的に決める（並びを人が列挙しない。C3-203）
+  v[order(nchar(names(v)), decreasing = TRUE)]
+}
+
+## 注記の印を実際の値へ置き換える。1つでも置き換えられない印があれば注記ごと落とす。
+## 印が残ったまま印字すると、読み手には意味の無い文字列が見える（SAS の %_fosub も同じ
+## 契約で、共通注記・図表別脚注のどちらも、どの表示型でもこの関数を通る。C3-204）。
+## 落ちた注記は成果物からは見えない。脚注の無い普通の表と区別が付かないので、図表番号・
+## 注記のキー・落ちた印とその出どころ・理由の記号を tlf_miss へ残す。控えは実行の最後に
+## 数えられ、STRICT なら非0で終えるため、注記の消えた図表は納品へ進まない（C3-206。
+## SAS 系は %_fosub が同じ4項目を行頭 ERROR で出し、run-all-sas.py の ERROR 数が
+## 同じ働きをする）
+subst_note <- function(txt, d, aid = "", lblid = "", key = "") {
+  if (!nzchar(txt) || !grepl("&_", txt, fixed = TRUE)) return(txt)
+  mk <- note_marks()
+  pe <- NULL                                   # 判定は要るときに一度だけ組む
+  pe_done <- FALSE
+  for (k in names(mk)) {
+    if (!grepl(k, txt, fixed = TRUE)) next
+    src <- mk[[k]]
+    val <- NA_character_
+    if (startsWith(src, "ard:")) {
+      x <- stat_of(d, sub("^ard:", "", src))
+      if (is.finite(x)) val <- f0(x)
+    } else if (startsWith(src, "pe:")) {
+      if (!pe_done) { pe <- prim_values(d, aid); pe_done <- TRUE }
+      nm <- paste0("pe", sub("^pe:", "", src))
+      if (!is.null(pe) && nm %in% names(pe)) val <- pe[[nm]]
     }
+    if (is.na(val) || !nzchar(val)) {
+      tlf_miss("NOTE-VAL: [%s] 注記 %s を落とす。印 %s（%s）の値を作れない: %s",
+               lblid, key, k, src, txt)
+      return("")
+    }
+    txt <- gsub(k, val, txt, fixed = TRUE)
+  }
+  ## 宣言に無い印が残っていれば、正本が実装の知らない印を使っている。落として記録する
+  ## （検査 scripts/check-tlf-index.py が正本の側で先に捕まえる）
+  if (grepl("&_", txt, fixed = TRUE)) {
+    tlf_miss("NOTE-DECL: [%s] 注記 %s を落とす。宣言の無い印が残る: %s", lblid, key, txt)
+    return("")
   }
   txt
+}
+
+## 注記は二層で、共通注記（kind=fixed の note_ で始まるキー。表示型ごとの読み方）の
+## うしろに、図表別脚注（kind=footnote。キーは図表番号）を置く。層ごとに置き換えるので、
+## 片方が組めなくてももう片方は残る。全表示型がこの関数だけを通る（C3-204・C3-216・C3-217）
+build_note <- function(fixed_key, r) {
+  aid <- nz(r$analysis_id)
+  ## 解析IDを持たない宣言（図表グループで描く表示型）では ARD から印を引けない。
+  ## 空の解析IDが ARD の行に当たらないよう、行の無い枠を渡す
+  d <- if (nzchar(aid)) ARD[ARD$analysis_id == aid, ] else ARD[0, ]
+  parts <- c(if (nzchar(fixed_key)) fx(fixed_key) else "", lab("footnote", r$lblid))
+  ## 層を引いたカタログのキーを文言と組にして持つ。落ちた層がどれかは、文言が消えた
+  ## あとでは分からない（C3-206）
+  keys <- c(paste0("fixed/", fixed_key), paste0("footnote/", r$lblid))
+  parts <- vapply(seq_along(parts),
+                  function(i) subst_note(parts[i], d, aid, r$lblid, keys[i]), "")
+  paste(parts[nzchar(parts)], collapse = " ")
+}
+
+## 正本の ci_method が名乗る方式のうち、この実装が計算しているもの。時点の信頼区間は
+## survfit の conf.type="log-log"（SAS 系は proc lifetest の conftype=loglog）で作った、
+## Greenwood の分散に log(-log(S)) を当てた区間である。正本がこれ以外を宣言したら、ARD が
+## 持つ下限は宣言どおりの量ではないので止める（C3-213）
+PRIM_CI_METHOD <- "loglog"
+
+## 主要評価項目の判定が作る値を返す。判定の規則の正本は primary-endpoint.csv で、閾値と
+## 時点のほかに、信頼区間の方式（ci_method）・比較の式（comparison）・推定統計量の名前
+## （estimate_operation）も同じ表が持つ。統計量の名前も比較の向きもここへ写さず読む
+## （C3-213。2026-08-31 まで lcl・surv・> をコードが持っており、正本を変えても判定の規則へ
+## 届かなかった）。宣言の解析が正本の指す解析でないときは NULL を返し、呼び出し側が
+## 注記を落とす（他の表がこの脚注を持っても空振りするだけ）。それ以外の不足は理由の記号で
+## 扱いを分け、受入基準そのものが読めない PE-CSV・PE-CMP・PE-CI は止め、結果値が足りない
+## PE-VAL は脚注を落として続ける（2026-09-03 の運用5。C3-207・C3-213・C3-214。同じ記号と
+## 同じ扱いを SAS の %_pemake も持つ）。
+## 返す名前は印の宣言の pe:<名前> に pe を冠したもので、SAS のマクロ変数 _pe<名前> と揃う
+prim_values <- function(d, aid) {
+  ## 受入基準が読めないときは止める。握り潰すと、閾値と判定を持つ脚注が図表から
+  ## 黙って消えたまま刷り上がる（2026-08-31 に置き場を移したときに塞いだ）
+  pe <- read_csv(ap_spec("primary-endpoint.csv"),
+                 col_types = cols(.default = "c"), progress = FALSE,
+                 na = character())
+  if (!all(c("item", "value") %in% names(pe)))
+    ap_stop("PE-CSV: primary-endpoint.csv が item・value の列を持たない")
+  v <- setNames(nz(pe$value), nz(pe$item))
+  ## 判定の規則を組むのに要る項目。1つでも欠けていれば正本として成立していない
+  need <- c("analysis_id", "timepoint", "threshold",
+            "ci_method", "comparison", "estimate_operation")
+  val <- setNames(nz(v[need]), need)
+  if (any(!nzchar(val)))
+    ap_stop("PE-CSV: primary-endpoint.csv に %s が無い",
+            paste(need[!nzchar(val)], collapse = "・"))
+  ## 判定を組めない表ではこの脚注を出さない。印が残ったまま印字すると、読み手に
+  ## 意味の無い文字列が見える（SAS の %_nvset も、%_pemake が判定を組んだ解析と
+  ## 描いている解析が違えば印の値を空にする）
+  if (!nzchar(aid) || val[["analysis_id"]] != aid) return(NULL)
+  if (val[["ci_method"]] != PRIM_CI_METHOD)
+    ap_stop("PE-CI: 信頼区間の方式が実装と違う: 正本 %s / 実装 %s",
+            val[["ci_method"]], PRIM_CI_METHOD)
+  ## 比較の式は「<ARD の統計量> <演算子> <正本の項目>」の形だけを解釈する。読めない式を
+  ## 既定の向きで黙って判定すると、正本を変えても判定が変わらない（SAS の %_pemake も
+  ## 同じ形だけを受ける）
+  cmp <- regmatches(val[["comparison"]],
+                    regexec("^\\s*([A-Za-z0-9_]+)\\s*(>=|<=|>|<)\\s*([A-Za-z0-9_]+)\\s*$",
+                            val[["comparison"]]))[[1]]
+  if (length(cmp) != 4L)
+    ap_stop("PE-CMP: comparison を解釈できない: %s", val[["comparison"]])
+  if (!cmp[4] %in% names(v))
+    ap_stop("PE-CMP: comparison の右辺 %s が正本の項目に無い: %s", cmp[4], val[["comparison"]])
+  ops <- list(">" = `>`, ">=" = `>=`, "<" = `<`, "<=" = `<=`)
+  tp <- val[["timepoint"]]
+  thr <- suppressWarnings(as.numeric(nz(v[[cmp[4]]])))
+  x <- d[d$variable_level == tp, ]
+  cv <- stat_of(x, cmp[2])                        # 比較の左辺。現行の正本では下限
+  est <- stat_of(x, val[["estimate_operation"]])  # 印字する推定値。現行の正本では生存割合
+  ## 推定値・比較の左辺・閾値のどれかが数値として取れないときは、脚注を落として続ける。
+  ## 欠けたまま組むと空欄の混じった脚注や、閾値を数値と解せないままの判定が刷り上がるので
+  ## 出さないが（C3-214）、これは表 5.4.1 の結果値が ARD に無いという1表の話であり、原因を
+  ## 調べるには他の表も含めて1回走り切ったほうが分かる（2026-09-03 の運用5。C3-214 の対応と
+  ## して 2026-08-31 に入れた ap_stop を、受入基準そのものが読めない PE-CSV・PE-CMP・PE-CI と
+  ## 分けた。ap_stop は tlf_miss を経ずに stop() を投げるので、駆動の tryCatch が表そのものを
+  ## 作れなかったものとして捨て、脚注1つのために表 5.4.1 が丸ごと出なくなっていた）。
+  ## 落としたことは NOTE-VAL と同じ形で tlf_miss へ残し、実行の最後に STRICT が非0で終える
+  ## ため、脚注の消えた図表は納品へ進まない（C3-206）。記号は PE-VAL のまま置く。NOTE-VAL へ
+  ## 寄せると、印の値を作れない他の原因と区別が付かない。NULL を返したあとは呼び出し側
+  ## （subst_note）が注記を落とし、その層のキーを NOTE-VAL として続けて残す。ARD の段階も
+  ## 同じ条件を WARNING PE-VAL で通すので（<試験ID>_ARD.R）、段階による扱いの差は
+  ## これで無くなる。
+  ## 時点の表示名は lvl() が引けなければ識別子を返すので、ここで空にはならない
+  if (!is.finite(est) || !is.finite(cv) || !is.finite(thr)) {
+    tlf_miss("PE-VAL: 主要評価項目の脚注を落とす。結果値が足りない: 解析 %s 時点 %s（%s=%s / %s=%s / %s=%s）",
+             aid, tp, val[["estimate_operation"]], est, cmp[2], cv, cmp[4], nz(v[[cmp[4]]]))
+    return(NULL)
+  }
+  ## 向きは正本の comparison が持つ。PRT 9.4 の「上回る」は厳密な > で、ちょうど等しい
+  ## ときは超えていない
+  dec <- if (ops[[cmp[3]]](cv, thr)) "MET" else "NOT MET"
+  c(petp = lvl(tp), peest = f1(100 * est), pelcl = f1(100 * cv),
+    pethr = f1(100 * thr), pedec = dec)
 }
 
 ## 指定時点（Y1〜Y5）の行だけを取る。除外ではなく採用で書くのは、Mth-KM が指定時点の
 ## ほかに生存曲線の全イベント時点（T<年>）と中央値（MEDIAN）と例数（水準なし）を持つため。
 ## 除外の列挙で書いていたときに曲線の行が表へ入り、表 5.4.1 が5行のところ89行出ていた
-## （2026-08-29 に検出。ars-migration-plan.md 第3段が「時点で絞る形に変える」としていた
+## （2026-08-29 に検出。records/ars-migration-20260829.md 第3段が「時点で絞る形に変える」としていた
 ## 積み残し）。両系統が同じように出るので、系統間の突合では捕まらない
 d_surv <- function(r, ctx, est, esthdr, note) {
   d <- ARD[ARD$analysis_id == r$analysis_id & ARD$context == ctx &
@@ -287,9 +594,17 @@ d_surv <- function(r, ctx, est, esthdr, note) {
     c(lvl(k), f1(100 * stat_of(x, est)), f1(100 * stat_of(x, "se")),
       catx(" - ", f1(100 * stat_of(x, "lcl")), f1(100 * stat_of(x, "ucl"))))
   })
-  all <- ARD[ARD$analysis_id == r$analysis_id, ]
+  ## 信頼区間のセルは下限と上限を1つにまとめたもの。鍵の統計量は先に出る下限のままにし、
+  ## セルに出た統計量を stats で数え上げる（C3-103）
+  keys <- lapply(names(g)[ord], function(k) {
+    x <- g[[k]]
+    g1 <- nz(x$group1_level[1])
+    c("", ky(r$analysis_id, k, g1, est), ky(r$analysis_id, k, g1, "se"),
+      ky(r$analysis_id, k, g1, "lcl",
+         shown(lcl = f1(100 * stat_of(x, "lcl")), ucl = f1(100 * stat_of(x, "ucl")))))
+  })
   list(cols = c(fx("timepoint"), esthdr, fx("se"), fx("ci95")), rows = rows,
-       note = subst_note(fx(note), all))
+       keys = keys, note = build_note(note, r))
 }
 d_tab_km  <- function(r) d_surv(r, "survival", "surv", fx("surv"), "note_km")
 d_tab_cif <- function(r) d_surv(r, "cuminc",   "cif",  fx("cif"),  "note_cif")
@@ -304,44 +619,79 @@ d_tab_bg <- function(r) {
   ## 宣言の levels= があればその順を最優先にする（SAS の %tab_bg と同じ）。来院と無関係な
   ## 区分（到達までの時間の区分など）を表ごとに指定するための口で、指定に無い水準は
   ## 後ろへ回す（2026-08-23）
-  lvseq <- if (is.na(r$levels) || !nzchar(r$levels)) character(0) else
-             strsplit(r$levels, "|", fixed = TRUE)[[1]]
+  lvseq <- lvsplit(r$levels)
   seqof <- function(id) { i <- match(nz(id), lvseq); if (is.na(i)) 99999L else i }
   key <- paste(d$analysis_id, d$variable, d$group1_level, d$variable_level, sep = "\u0001")
   g <- split(d, key)
   rows <- lapply(names(g), function(k) {
     x <- g[[k]]
     ctx <- max(x$context)
-    item <- paste(vapply(icols, function(cc) lvl(x[[cc]][1]), ""), collapse = " / ")
+    ## 行項目の表示名も図表ごとに差し替えられる（lvl_for）。プレフェーズの
+    ## REDUCEFL は減量ではなく漸増の有無を表すので、表 5.3.1 だけ別の行ラベルを
+    ## 当てる（SAS 側は %tab_bg が _lvcat へ <キー>_<図表ID> で二重 join する）
+    item <- paste(vapply(icols, function(cc) lvl_for(x[[cc]][1], r$lblid), ""),
+                  collapse = " / ")
+    ## 行項目の順序番号。連続量の行は水準を持たないので、これが無いと並びが定まらない（SAS の %tab_bg の ITEMORD と同じ）
+    iord <- sprintf("%04d", lvord(x[[icols[1]]][1]))
     if (ctx == "continuous") {
       med <- f1(stat_of(x, "median")); mn <- f1(stat_of(x, "min"))
       mx <- f1(stat_of(x, "max")); me <- f1(stat_of(x, "mean"))
       sd <- f1(stat_of(x, "sd")); nm <- stat_of(x, "nmiss")
-      val <- paste0(med, " [", mn, ", ", mx, "] ", fx("mean"), " ", me, " SD ", sd)
-      ## 欠測数を足す前に trimws する。SD が定義できない（n=1 など）と val が "… SD " で
-      ## 終わり、そのまま足すと空白が2つ並ぶ。SAS 側は catx が欠測を落とすため1つになり、
-      ## セル台帳の突合で値ではなく空白の差として出る（issues.md 24。表 5.2.5 の CyA）
-      if (!is.na(nm) && nm > 0) val <- paste0(trimws(val), " ", fx("missing"), f0(nm))
-      list(sort = c(x$analysis_id[1], "99999", "9999", "99999", ""),
-           cells = c(item, "", val))
+      q1 <- f1(stat_of(x, "q1")); q3 <- f1(stat_of(x, "q3"))
+      ## 値の無い統計量はラベルごと落とす。n=1 では SD が定義できず「… 平均 630.0 SD」と
+      ## ラベルだけが残っていた（C2-217。2026-08-30 の目視確認）。四分位点は下限と上限を
+      ## 1つのラベルで並べるので、片方でも欠ければ「Q1-Q3 2.0-」にならないよう両方の
+      ## 有無で見る。SAS 側は tlf_ops.sas の %tab_bg が同じ組み立てをする
+      val <- paste0(med, " [", mn, ", ", mx, "]")
+      qq <- if (nzchar(q1) && nzchar(q3)) paste0(q1, "-", q3) else ""
+      if (nzchar(qq)) val <- paste0(val, " ", fx("q1q3"), " ", qq)
+      if (nzchar(me)) val <- paste0(val, " ", fx("mean"), " ", me)
+      if (nzchar(sd)) val <- paste0(val, " SD ", sd)
+      nmc <- if (!is.na(nm) && nm > 0) f0(nm) else ""
+      if (nzchar(nmc)) val <- paste0(trimws(val), " ", fx("missing"), nmc)
+      ## 解析例数は宣言の show_n=Y を持つ表だけがセルの先頭に出す（表5.4.7.2・5.4.7.5）。
+      ## 行を増やさずコース別の分母を示すための口である。欠測数は出さない。両表とも欠測は
+      ## 全組0だが、値の無い症例は入力の行として存在しないため、0 と書くと「欠測が無い」
+      ## という別のことを述べてしまう（C2-045。SAS 側は %tab_bg の show_n= が同じ）
+      nc <- if (nz(r$show_n) == "Y") f0(stat_of(x, "n")) else ""
+      if (nzchar(nc)) val <- paste0("n=", nc, " ", trimws(val))
+      list(sort = c(x$analysis_id[1], iord, "99999", "9999", "99999", ""),
+           cells = c(item, "", val),
+           ## 連続量の要約は例数・中央値・最小・最大・四分位点・平均・SD・欠測を1つの
+           ## セルに並べたもの。鍵の統計量は先に出る中央値のままにし、出た統計量を
+           ## セルに出る順に数え上げる（C3-103）
+           keys = c("", "", ky(x$analysis_id[1], x$variable_level[1],
+                               x$group1_level[1], "median",
+                               shown(n = nc, median = med, min = mn, max = mx,
+                                     q1 = qq, q3 = qq,
+                                     mean = me, sd = sd, nmiss = nmc))))
     } else {
-      list(sort = c(x$analysis_id[1],
+      list(sort = c(x$analysis_id[1], iord,
                     sprintf("%05d", seqof(x$variable_level[1])),
                     sprintf("%04d", lvord(x$variable_level[1])),
                     sprintf("%05d", lvvisit(x$variable_level[1])),
                     nz(x$variable_level[1])),
            cells = c(item, lvl(x$variable_level[1]),
-                     paste0(f0(stat_of(x, "n")), " (", f1(stat_of(x, "p")), ")")))
+                     np(f0(stat_of(x, "n")), f1(stat_of(x, "p")))),
+           keys = c("", "", ky(x$analysis_id[1], x$variable_level[1],
+                               x$group1_level[1], "n",
+                               shown(n = f0(stat_of(x, "n")),
+                                     p = f1(stat_of(x, "p"))))))
     }
   })
+  ## 鍵は 解析ID → 行項目の順序番号 → 宣言の順 → 順序番号 → 来院番号 → 識別子。
+  ## 行項目の順序番号は SAS の %tab_bg の ITEMORD と同じ位置に置く（2026-09-11）
   o <- ordc(vapply(rows, function(x) x$sort[1], ""),
             vapply(rows, function(x) x$sort[2], ""),
             vapply(rows, function(x) x$sort[3], ""),
             vapply(rows, function(x) x$sort[4], ""),
-            vapply(rows, function(x) x$sort[5], ""))
+            vapply(rows, function(x) x$sort[5], ""),
+            vapply(rows, function(x) x$sort[6], ""))
+  note <- build_note("note_bg", r)
   list(cols = c(fx(if (is.na(r$item_label) || !nzchar(r$item_label)) "item" else r$item_label),
                 fx("categ"), fx("summary")),
-       rows = lapply(rows[o], function(x) x$cells), note = fx("note_bg"))
+       rows = lapply(rows[o], function(x) x$cells),
+       keys = lapply(rows[o], function(x) x$keys), note = note)
 }
 
 d_tab_aegr <- function(r) {
@@ -369,10 +719,11 @@ d_tab_aegr <- function(r) {
   }
   d <- apply_filter(ARD[ARD$output_id == r$output_id, ], flt)
   if (!nrow(d)) return(NULL)
-  ## グレードの区切りは宣言の levels= が持つ。空なら CTCAE の4区分を既定にする。
-  ## 区切り方は表示の選択なので表示型に直書きしない（2026-08-29。SAS の %tab_aegr と同じ）
-  glv <- if (is.na(r$levels) || !nzchar(r$levels)) c("Grade 1-2", "Grade 3", "Grade 4", "Grade 5")
-         else strsplit(r$levels, "|", fixed = TRUE)[[1]]
+  ## グレードの区切りは宣言の levels= が持つ。空なら CTCAE の4区分（LS_AEGR4）を既定に
+  ## する。区切り方は表示の選択なので表示型に直書きせず、集合の正本である
+  ## docs/metadata/level-sets.csv から引く（C3-002。2026-09-03。SAS の %tab_aegr も同じ）
+  glv <- lvsplit(r$levels)
+  if (!length(glv)) glv <- lvsetd("LS_AEGR4")
   key <- paste(d$group1_level, d$data_subset, d$variable, sep = "\u0001")
   g <- split(d, key)
   gr <- function(x, lv) {
@@ -381,15 +732,31 @@ d_tab_aegr <- function(r) {
   }
   rows <- lapply(names(g), function(k) {
     x <- g[[k]]
+    ## 分母は全グレードの行が同じ N を持つので、どの行から来たかが1つに決まらない。
+    ## 水準はバイト順で最小のものを代表にする（SAS の %tab_aegr も同じ。C2-068）。
+    ## 代表であることは kind に repr を置いて台帳へ残す（C3-104）
+    aid <- minc(x$analysis_id)
+    nv <- x$variable_level[x$stat_name == "N" & !is.na(x$stat_num)]
+    nk <- if (!length(nv)) "" else
+            ky(aid, minc(nv), x$group1_level[1], "N", kind = "repr")
+    ## 結果値の無いグレードはセルが空になる。鍵も空にする（ARD に無い行を指さない）
+    gk <- function(lv) {
+      if (!length(x$stat_num[x$stat_name == "n" & x$variable_level == lv])) ""
+      else ky(aid, lv, x$group1_level[1], "n")
+    }
     list(sort = c(x$group1_level[1], x$data_subset[1], x$variable[1]),
          cells = c(x$variable[1], f0(stat_of(x, "N")),
-                   vapply(glv, function(g) gr(x, g), "", USE.NAMES = FALSE)))
+                   vapply(glv, function(g) gr(x, g), "", USE.NAMES = FALSE)),
+         keys = c("", nk, vapply(glv, gk, "", USE.NAMES = FALSE)))
   })
   o <- ordc(vapply(rows, function(x) x$sort[1], ""),
             vapply(rows, function(x) x$sort[2], ""),
             vapply(rows, function(x) x$sort[3], ""))
-  list(cols = c(fx("ae"), fx("denom"), glv),
-       rows = lapply(rows[o], function(x) x$cells), note = "")
+  ## 列見出しは水準の表示名を引く。宣言の levels= は識別子で書くので、そのまま出すと
+  ## NOTRECORDED のような内部の名前が表に出る（C2-056）
+  list(cols = c(fx("ae"), fx("denom"), vapply(glv, lvl, "", USE.NAMES = FALSE)),
+       rows = lapply(rows[o], function(x) x$cells),
+       keys = lapply(rows[o], function(x) x$keys), note = build_note("", r))
 }
 
 ## ---------------------------------------------------------------------------------
@@ -445,11 +812,11 @@ km_band <- function(fit, cols, xmax) {
 }
 
 ## 曲線の当てはめ。デバイスを開く前に済ませ、描くものが無ければ NULL を返す。
-## 信頼区間は線形形式（Greenwood の分散をそのまま用いる）にする。SAP A-2 が定める方式で、
-## SAS の PROC LIFETEST は CONFTYPE=LINEAR、ARD の %ard_km・ard_km も同じ。survfit の
-## 既定は conf.type="log" で、同じデータでも信頼限界が 0.6〜0.7 ポイント違う。表と図で
-## 別の方式の区間を並べないため、ここで揃える（2026-08-29）。この当てはめは Excel の
-## チャートの元にもなるので、Excel のシートに載る値も ARD と同じ方式の値になる
+## 信頼区間は log-log 変換（Greenwood の分散に log(-log(S)) を当てる）にする。SAS の
+## PROC LIFETEST は CONFTYPE=LOGLOG、ARD の %ard_km・ard_km も同じ。survfit の既定は
+## conf.type="log" で、同じデータでも信頼限界が違う。表と図で別の方式の区間を並べない
+## ため、ここで揃える（2026-08-29 に揃え、2026-09-12 に線形形式から改めた）。この
+## 当てはめは Excel のチャートの元にもなるので、Excel のシートに載る値も ARD と同じになる
 km_fit <- function(r) {
   d <- load_adtte()
   if (is.null(d)) return(NULL)
@@ -463,7 +830,7 @@ km_fit <- function(r) {
   } else {
     stats::as.formula("survival::Surv(Y, EV) ~ 1")
   }
-  survival::survfit(fm, data = x, conf.type = "plain")
+  survival::survfit(fm, data = x, conf.type = "log-log")
 }
 
 ## 当てはめを Excel が読める形へ開く。群ごとに時点・生存確率・信頼限界・打ち切り数を持つ。
@@ -496,18 +863,30 @@ km_atrisk <- function(fit, times = 0:5) {
 }
 
 ## 下描き。開いているデバイスへ描く（SVG を HTML へ埋める）
-km_paint <- function(fit) {
+km_paint <- function(fit, lblid = "") {
   ng <- max(1, length(fit$strata))
   cols <- seq_len(ng)
   op <- graphics::par(mar = c(4.2, 4.2, 0.6, 0.6))
   # 枠と軸だけ先に描き、信頼区間の帯を敷いてから曲線を重ねる。帯を後から描くと
   # 曲線と打ち切りの目印が帯の下に隠れる
-  plot(fit, xlab = fx("xaxis_km"), ylab = fx("yaxis_km"), ylim = c(0, 1),
+  plot(fit, xlab = fx_for("xaxis_km", lblid), ylab = fx("yaxis_km"), ylim = c(0, 1),
        xlim = c(0, 5), conf.int = FALSE, mark.time = FALSE, col = NA)
   km_band(fit, cols, xmax = 5)
   graphics::lines(fit, conf.int = FALSE, mark.time = TRUE, col = cols, lwd = 2)
   if (!is.null(fit$strata)) {
-    graphics::legend("bottomleft", legend = sub("^[^=]*=", "", names(fit$strata)),
+    ## 凡例は survfit の層の名前（HSCTFL=N）から値を取り出したもので、そのままでは
+    ## 識別子が図に出る。カタログに <変数>_<水準> があればそれを、無ければ水準そのものを
+    ## 引く（C2-064。2026-08-30 に図を見て判明）
+    nm <- names(fit$strata)
+    gv <- sub("=.*$", "", nm[1])
+    lv <- sub("^[^=]*=", "", nm)
+    lg <- vapply(lv, function(v) {
+      a <- lab("level", paste0(gv, "_", v))
+      if (nzchar(a)) return(a)
+      b <- lab("level", v)
+      if (nzchar(b)) b else v
+    }, "", USE.NAMES = FALSE)
+    graphics::legend("bottomleft", legend = lg,
                      col = seq_along(fit$strata), lwd = 2, bty = "n")
   }
   graphics::par(op)
@@ -520,12 +899,28 @@ d_fig_km <- function(r, fit) {
   tmp <- tempfile(fileext = ".svg")
   grDevices::svg(tmp, width = 6.3, height = 4.3, pointsize = 10, family = SVGFONT)
   on.exit(if (!is.null(grDevices::dev.list())) grDevices::dev.off(), add = TRUE)
-  km_paint(fit)
+  km_paint(fit, r$lblid)
   grDevices::dev.off()
   on.exit()
   svg <- paste(readLines(tmp, warn = FALSE), collapse = "\n")
   unlink(tmp)
   svg_localize(sub("^<\\?xml[^>]*\\?>\\s*(<!DOCTYPE[^>]*>)?\\s*", "", svg), r$lblid)
+}
+
+## 図を独立したベクター形式のファイルとしても出す（C2-112）。論文へ図を出すとき、投稿先は
+## ベクター形式（EPS・PDF・SVG）か高解像度のラスタを求めるが、HTML へ埋めた SVG は
+## 単体で取り出せない。書くのは HTML へ埋めるのと同じ文字列で、図が2種類にならないようにする。
+## 埋め込みでは省ける XML 宣言だけを先頭へ足す（xmlns は cairo が <svg> へ書いている）。
+## 文字列は cairo が書いたバイトのままなので、端末の既定符号化を挟まないよう writeBin で出す。
+write_fig_svg <- function(dir, lblid, svg) {
+  if (is.null(svg) || !nzchar(svg)) return(invisible(FALSE))
+  ap_mkdir(dir)
+  s <- if (grepl("<svg[^>]*xmlns=", svg)) svg else
+    sub("<svg", '<svg xmlns="http://www.w3.org/2000/svg"', svg, fixed = TRUE)
+  con <- file(file.path(dir, paste0(lblid, ".svg")), open = "wb")
+  on.exit(close(con))
+  writeBin(charToRaw(paste0('<?xml version="1.0" encoding="UTF-8"?>\n', s, "\n")), con)
+  invisible(TRUE)
 }
 
 ## ---------------------------------------------------------------------------------
@@ -586,22 +981,58 @@ d_tab_prop_grp_multi <- function(r) {
   aids <- unique(vapply(spec, function(s) s$aid, ""))
   d <- ARD[ARD$analysis_id %in% aids & ARD$context == "categorical", ]
   if (!nrow(d)) return(NULL)
+  ## 群ごとの対象症例数は先頭の行ブロックの解析が持つ（下の nkey・rows と同じ）
+  a1 <- spec[[1]]$aid
+  nden <- vapply(gs, function(gr) {
+    x <- d[d$group1_level == gr & d$analysis_id == a1, ]
+    if (!nrow(x)) NA_real_ else stat_of(x, "N")
+  }, 0)
+  names(nden) <- gs
+  ## 分母が表の対象症例数と違う行は、セルに分母を出して「n/N (p)」にする。分母の
+  ## 違う解析を同じ列に並べる表があるため（表 5.4.12 は死因の内訳が死亡例10、
+  ## 治療関連死が FAS 全体88）。表 4.5.2.3 の「2/21」と形式が揃う（2026-09-12）
   cell <- function(gr, aid, lv) {
     x <- d[d$analysis_id == aid & d$group1_level == gr & d$variable_level == lv, ]
     if (!nrow(x)) return("")
-    paste0(f0(stat_of(x, "n")), " (", f1(stat_of(x, "p")), ")")
+    n <- f0(stat_of(x, "n"))
+    den <- stat_of(x, "N")
+    if (nzchar(n) && !is.na(den) && !is.na(nden[[gr]]) && den != nden[[gr]])
+      n <- paste0(n, "/", f0(den))
+    np(n, f1(stat_of(x, "p")))
+  }
+  ## 「n (p)」の形は2つの統計量を並べたものなので、出た方を stats で数え上げる（C3-103）
+  cellk <- function(gr, aid, lv) {
+    x <- d[d$analysis_id == aid & d$group1_level == gr & d$variable_level == lv, ]
+    if (!nrow(x)) return("")
+    ky(aid, lv, gr, "n", shown(n = f0(stat_of(x, "n")), p = f1(stat_of(x, "p"))))
+  }
+  ## 対象症例数の行は、先頭の行ブロックの解析が持つ N を出す。表の集団を表す行なので、
+  ## 分母の違う解析を同じ列に並べる表では別の分母を拾ってはいけない（表 5.4.12 は
+  ## 死因の内訳が死亡例10、治療関連死が FAS 全体88。群の全行から最大を採っていた頃は
+  ## 88 が出ていた。2026-09-12）。どの水準の行から来たかは決まらないので、水準は
+  ## バイト順で最小のものを代表にする（SAS の %tab_prop_grp_multi も同じ。C2-068）。
+  ## 代表であることは kind に repr を置いて台帳へ残す（C3-104）
+  nkey <- function(gr) {
+    v <- d[d$group1_level == gr & d$analysis_id == a1 & d$stat_name == "N" &
+           !is.na(d$stat_num), ]
+    if (!nrow(v)) return("")
+    ky(a1, minc(v$variable_level), gr, "N", kind = "repr")
   }
   ## 先頭に対象症例数の行を置く（SAS の _gp2 の第1行と同じ）
   rows <- list(c(fx("nsubj"), vapply(gs, function(gr) {
-    x <- d[d$group1_level == gr, ]
+    x <- d[d$group1_level == gr & d$analysis_id == a1, ]
     if (!nrow(x)) "" else f0(stat_of(x, "N"))
   }, "")))
+  keys <- list(c("", vapply(gs, nkey, "")))
   for (s in spec) {
     for (lv in s$lvs) {
-      rows[[length(rows) + 1L]] <- c(lvl(lv), vapply(gs, cell, "", aid = s$aid, lv = lv))
+      rows[[length(rows) + 1L]] <- c(lvl_for(lv, r$lblid),
+                                     vapply(gs, cell, "", aid = s$aid, lv = lv))
+      keys[[length(keys) + 1L]] <- c("", vapply(gs, cellk, "", aid = s$aid, lv = lv))
     }
   }
-  list(cols = c(lab("rowlbl", r$lblid), vapply(gs, lvl, "")), rows = rows, note = "")
+  list(cols = c(lab("rowlbl", r$lblid), vapply(gs, lvl, "")), rows = rows,
+       keys = keys, note = build_note("", r))
 }
 
 ## 評価時点を行に持つ表（SAS の %tab_prop_tp）。行の並びと表示名は docs/metadata/mr-timepoint.csv。
@@ -610,7 +1041,7 @@ d_tab_prop_grp_multi <- function(r) {
 d_tab_prop_tp <- function(r) {
   d <- ARD[ARD$output_id == r$output_id & ARD$context == "categorical", ]
   if (!nrow(d)) return(NULL)
-  ls <- strsplit(r$levels, "\\|")[[1]]
+  ls <- lvsplit(r$levels)
   tp <- read_csv(ap_spec("mr-timepoint.csv"), col_types = cols(.default = "c"),
                  progress = FALSE, na = character())
   tp <- tp[order(suppressWarnings(as.numeric(tp$order))), ]
@@ -623,12 +1054,38 @@ d_tab_prop_tp <- function(r) {
     x <- main[main$group1_level == gr & main$variable_level == lv, ]
     if (!nrow(x)) return("")
     y <- nsd[nsd$group1_level == gr & nsd$variable_level == lv, ]
-    if (nrow(y)) paste0(f0(stat_of(x, "n")), " (", f0(stat_of(y, "n")), ")")
-    else         paste0(f0(stat_of(x, "n")), " (", f1(stat_of(x, "p")), ")")
+    ## 部分集合の件数は角括弧に入れる。丸括弧のままだと割合と外見上まったく区別が
+    ## 付かず、同じ表の中で「例数（割合）」と「例数（別の例数）」が混ざる（C2-053）
+    if (nrow(y)) nb(f0(stat_of(x, "n")), f0(stat_of(y, "n")))
+    else         np(f0(stat_of(x, "n")), f1(stat_of(x, "p")))
+  }
+  ## 鍵は括弧の中身（部分集合の件数）ではなく先に出る件数（main の n）を指す。
+  ## 解析IDは宣言が持たないので、当たった ARD の行から取る（C2-068）。
+  ## 角括弧に部分集合の件数が入るセルは、その件数が別の解析（別の data_subset）の行から
+  ## 来るため鍵の4つでは名指しできない。kind に part を置いて、鍵が値の一部しか説明して
+  ## いないことを台帳へ残す。丸括弧の割合は同じ行の p なので stats で数え上げる（C3-103）
+  cellk <- function(lv, gr) {
+    x <- main[main$group1_level == gr & main$variable_level == lv, ]
+    if (!nrow(x)) return("")
+    y <- nsd[nsd$group1_level == gr & nsd$variable_level == lv, ]
+    if (nrow(y)) ky(x$analysis_id[1], lv, gr, "n", kind = "part")
+    else ky(x$analysis_id[1], lv, gr, "n",
+            shown(n = f0(stat_of(x, "n")), p = f1(stat_of(x, "p"))))
+  }
+  ## 行の表示名は mr-timepoint.csv の label。日英の表示を与えたい時点だけ label-catalog に
+  ## kind=level で <群の識別子>_<図表ID> を登録し、そちらを先に引く（lvl_for と同じ形）。
+  ## SAP の列見出しが内部識別子のままだった adjuvant_cmr・molpd・molr・relapse が該当する
+  ## （C2-217。SAS の %tab_prop_tp も同じ引き当てをする）
+  tplab <- function(i) {
+    v <- lab("level", paste0(tp$glabel[i], "_", r$lblid))
+    if (nzchar(v)) v else tp$label[i]
   }
   rows <- lapply(seq_len(nrow(tp)), function(i)
-    c(tp$label[i], vapply(ls, cell, "", gr = tp$glabel[i])))
-  list(cols = c(lab("rowlbl", r$lblid), vapply(ls, lvl, "")), rows = rows, note = "")
+    c(tplab(i), vapply(ls, cell, "", gr = tp$glabel[i])))
+  keys <- lapply(seq_len(nrow(tp)), function(i)
+    c("", vapply(ls, cellk, "", gr = tp$glabel[i])))
+  list(cols = c(lab("rowlbl", r$lblid), vapply(ls, lvl, "")), rows = rows,
+       keys = keys, note = build_note("", r))
 }
 
 ## 欠測を空文字にする。ARD・ADaM を CSV/JSON から読むと空欄が NA になるため、
@@ -644,7 +1101,11 @@ d_tab_count <- function(r) {
   d <- d[ordc(d$analysis_id), ]
   rows <- lapply(seq_len(nrow(d)), function(i)
     c(lvl(nz(d$variable_level[i])), f0(d$stat_num[i])))
-  list(cols = c(fx("categ"), fx("ncnt")), rows = rows, note = "")
+  ## 1行が ARD の1行なので、鍵はその行の値をそのまま指す（C2-068）
+  keys <- lapply(seq_len(nrow(d)), function(i)
+    c("", ky(d$analysis_id[i], d$variable_level[i], d$group1_level[i], "n")))
+  list(cols = c(fx("categ"), fx("ncnt")), rows = rows, keys = keys,
+       note = build_note("", r))
 }
 
 ## コース別の実施状況表（SAS の %tab_crs）。SAP 5.3.4〜5.3.6 の図表案は1節=1表で、
@@ -655,7 +1116,7 @@ d_tab_count <- function(r) {
 ## 行の並びは コース順 → 解析ID → 水準の識別子。水準は表示名ではなく識別子で並べるので
 ## 日本語版と英語版で行の並びが変わらない。
 d_tab_crs <- function(r) {
-  cs <- strsplit(nz(r$levels), "\\|")[[1]]
+  cs <- lvsplit(r$levels)
   d <- ARD[ARD$output_id == r$output_id & ARD$data_subset %in% cs, ]
   if (!nrow(d)) return(NULL)
   co  <- match(d$data_subset, cs)
@@ -666,30 +1127,48 @@ d_tab_crs <- function(r) {
     x   <- d[j, ]
     ctx <- max(x$context)
     grp <- if (nzchar(nz(x$group1[1]))) lvl(nz(x$group1_level[1])) else ""
+    ## 要約の列だけが ARD 由来。コース・薬剤区分・項目・区分は行ラベルなので鍵を持たない。
+    ## 統計量は連続量が median、それ以外が n（セルの先に出る方。C2-068）。
+    ## 要約のセルは統計量を複数並べるので、出たものを sts に数え上げる（C3-103）
+    st <- if (ctx == "continuous") "median" else "n"
+    sts <- st
     if (ctx == "count") {
       cell <- c(lvl(nz(x$variable_level[1])), "", f0(stat_of(x, "n")))
     } else if (ctx == "continuous") {
       med <- f1(stat_of(x, "median")); mn <- f1(stat_of(x, "min"))
       mx  <- f1(stat_of(x, "max"));    me <- f1(stat_of(x, "mean"))
       sd  <- f1(stat_of(x, "sd"));     nm <- stat_of(x, "nmiss")
-      val <- paste0(med, " [", mn, ", ", mx, "] ", fx("mean"), " ", me, " SD ", sd)
-      if (!is.na(nm) && nm > 0) val <- paste0(trimws(val), " ", fx("missing"), f0(nm))
+      q1  <- f1(stat_of(x, "q1"));     q3 <- f1(stat_of(x, "q3"))
+      ## 値の無い統計量はラベルごと落とす（d_tab_bg と同じ。C2-217）。四分位点は下限と
+      ## 上限を1つのラベルで並べるので、片方でも欠ければラベルごと落とす
+      val <- paste0(med, " [", mn, ", ", mx, "]")
+      qq <- if (nzchar(q1) && nzchar(q3)) paste0(q1, "-", q3) else ""
+      if (nzchar(qq)) val <- paste0(val, " ", fx("q1q3"), " ", qq)
+      if (nzchar(me)) val <- paste0(val, " ", fx("mean"), " ", me)
+      if (nzchar(sd)) val <- paste0(val, " SD ", sd)
+      nmc <- if (!is.na(nm) && nm > 0) f0(nm) else ""
+      if (nzchar(nmc)) val <- paste0(trimws(val), " ", fx("missing"), nmc)
+      sts <- shown(median = med, min = mn, max = mx, q1 = qq, q3 = qq,
+                   mean = me, sd = sd, nmiss = nmc)
       cell <- c(lvl(nz(x$variable[1])), "", val)
     } else {
-      cell <- c(lvl(nz(x$variable[1])), lvl(nz(x$variable_level[1])),
-                paste0(f0(stat_of(x, "n")), " (", f1(stat_of(x, "p")), ")"))
+      nc <- f0(stat_of(x, "n")); pc <- f1(stat_of(x, "p"))
+      sts <- shown(n = nc, p = pc)
+      cell <- c(lvl(nz(x$variable[1])), lvl(nz(x$variable_level[1])), np(nc, pc))
     }
     list(co = co[j][1], aid = x$analysis_id[1], lv = nz(x$variable_level[1]),
-         cells = c(lvl(nz(x$data_subset[1])), grp, cell))
+         cells = c(lvl(nz(x$data_subset[1])), grp, cell),
+         keys = c("", "", "", "",
+                  ky(x$analysis_id[1], x$variable_level[1],
+                     x$group1_level[1], st, sts)))
   })
   o <- ordc(vapply(rows, function(z) z$co, 0),
             vapply(rows, function(z) z$aid, ""),
             vapply(rows, function(z) z$lv, ""))
-  note <- fx("note_bg")
-  fo <- lab("footnote", r$lblid)
-  if (nzchar(fo)) note <- paste(note, fo)
+  note <- build_note("note_bg", r)
   list(cols = c(fx("course"), fx("drug_grp"), fx("item"), fx("categ"), fx("summary")),
-       rows = lapply(rows[o], function(z) unname(z$cells)), note = note)
+       rows = lapply(rows[o], function(z) unname(z$cells)),
+       keys = lapply(rows[o], function(z) unname(z$keys)), note = note)
 }
 
 ## ADaM を1つ読む（Dataset-JSON が無ければレビュー用 CSV）。1度読んだら使い回す
@@ -719,7 +1198,10 @@ d_tab_list <- function(r) {
   if (is.null(d) || !nrow(d)) return(NULL)
   rows <- lapply(seq_len(nrow(d)), function(i)
     vapply(vs, function(v) nz(d[[v]][i]), "", USE.NAMES = FALSE))
-  list(cols = vapply(ks, fx, "", USE.NAMES = FALSE), rows = rows, note = "")
+  ## 症例単位の一覧は結果値の集計ではなく ADaM から直接組む。どのセルも ARD の行を
+  ## 指さないので鍵を返さない（セル台帳の4列は空のままになる。C2-068）
+  list(cols = vapply(ks, fx, "", USE.NAMES = FALSE), rows = rows,
+       note = build_note("", r))
 }
 
 ## ---------------------------------------------------------------------------------
@@ -778,13 +1260,27 @@ html_page <- function(title, body) {
 render_lang <- function(lang) {
 LANG <<- lang
 TLFDIR <- ap_tlf_dir("r", LANG)
+## SAS 系の ARD から描くのは突合用のセル台帳を作るためで、図表そのものは要らない。
+## 出力先は ARD の系統を含まないので、書くと納品する図表（R 系の ARD から描いたもの）が
+## SAS 系由来のもので上書きされる。通し実行（run-release.py）の段階2は、--ard=r の後に
+## --ard=sas を回す。実際に納品物の出所が入れ替わっていた（2026-08-31。C3-115）。
+## 順序で避ける設計にしていたが、順序を間違えると黙って壊れるので書かない形にする
+WRITE_OUT <- ARDSRC != "sas"
 ## 前回の実行が残した図表 HTML を消す。宣言から外れた図表のファイルが残ると
 ## PI パッケージの相互リンクが片側だけ生きた状態になり、check-pi-package が落ちる
 ## 消すのは図表ファイル（T_… / F_…）だけ。同じディレクトリに通し読み HTML も置く
-if (dir.exists(TLFDIR))
+if (WRITE_OUT && dir.exists(TLFDIR))
   unlink(list.files(TLFDIR, pattern = "^[TF]_.*[.]html$", full.names = TRUE))
 ap_mkdir(TLFDIR)
-ap_archive_old(TLFDIR, paste0("^", TRIAL, "_TLF_.*[.](html|rtf|xlsx)$"), LANG)
+## 図を独立したベクター形式のファイルとして出す先（C2-112）。図表 HTML と混ぜず下の階層へ
+## 分けるのは、ここが読み物ではなく持ち出す素材だからで、索引・検査が見る直下の顔ぶれも変えない。
+## 図表 HTML と同じく、宣言から外れた図の残りが混ざらないよう毎回消してから書く
+FIGDIR <- file.path(TLFDIR, "figures")
+if (WRITE_OUT) {
+  if (dir.exists(FIGDIR))
+    unlink(list.files(FIGDIR, pattern = "^F_.*[.]svg$", full.names = TRUE))
+  ap_archive_old(TLFDIR, paste0("^", TRIAL, "_TLF_.*[.](html|rtf|xlsx)$"), LANG)
+}
 cells <- list()
 html_parts <- character(0)
 toc_parts <- character(0)          # 通し読み版の目次（表番号 → ページ内の錨）
@@ -804,38 +1300,47 @@ for (i in seq_len(nrow(IDX))) {
   r <- as.list(IDX[i, ])
   if (r$display == "fig_km") {
     fit <- tryCatch(km_fit(r), error = function(e) {
-      ap_note("WARN [%s] 当てはめができない: %s", r$lblid, conditionMessage(e)); NULL })
+      tlf_miss("[%s] 当てはめができない: %s", r$lblid, conditionMessage(e)); NULL })
     svg <- if (is.null(fit)) NULL else tryCatch(d_fig_km(r, fit), error = function(e) {
-      ap_note("WARN [%s] 図を描けない: %s", r$lblid, conditionMessage(e)); NULL })
+      tlf_miss("[%s] 図を描けない: %s", r$lblid, conditionMessage(e)); NULL })
     if (is.null(svg)) { n_skip <- n_skip + 1L; next }
-    # 図の読み方（打ち切りの目印と信頼区間の帯）を図の下に置く
-    body <- paste0(svg, "\n<p class=\"note\">", esc_html(fx("note_figkm")), "</p>")
+    ## 図の注記も表と同じ二層にする。共通注記（note_figkm。打ち切りの目印と信頼区間の帯
+    ## という読み方）のうしろに、図別の脚注（kind=footnote のキー F_…）を置く。以前は
+    ## R 系が共通注記だけ、SAS 系が図別脚注だけを出しており、層が系統間で逆転していた
+    ## （C3-216。SAS 系は %fig_km が %tlfnote と %tlffoot を並べる）
+    fnote <- build_note("note_figkm", r)
+    body <- paste0(svg, if (nzchar(fnote))
+                          paste0("\n<p class=\"note\">", esc_html(fnote), "</p>") else "")
     n_fig <- n_fig + 1L
+    ## 同じ SVG を独立したファイルとしても書く。埋め込む側の文字列は変えない
+    if (WRITE_OUT) tryCatch(write_fig_svg(FIGDIR, r$lblid, svg),
+             error = function(e)
+               tlf_miss("[%s] 図の SVG を書けない: %s", r$lblid, conditionMessage(e)))
     if (XLSX) {
       ## Excel は画像を貼らず、ブック内のデータ範囲を参照するチャートにする。SVG と同じ
       ## 当てはめから作るので、図と Excel で曲線も信頼限界も同じ値になる
       tryCatch(ap_xlsx_km(wb, r$lblid, ttl_sub(lab("title", r$lblid)),
                              lab("subtitle", r$lblid), km_curves(fit), km_atrisk(fit), TX),
                error = function(e)
-                 ap_note("WARN [%s] Excel の図を作れない: %s", r$lblid, conditionMessage(e)))
+                 tlf_miss("[%s] Excel の図を作れない: %s", r$lblid, conditionMessage(e)))
     }
   } else {
     ## 表示型は名前で引く。登録表を持たないので、汎用と試験固有のどちらに
     ## 定義してあっても駆動は同じ（SAS の %tlf_run が %<表示型>() を呼ぶのと同じ）
     fn <- get0(paste0("d_", r$display), mode = "function")
     if (is.null(fn)) {
-      ap_note("WARN [%s] 表示型 %s は未実装", r$lblid, r$display)
+      tlf_miss("[%s] 表示型 %s は未実装", r$lblid, r$display)
       n_skip <- n_skip + 1L; next
     }
     t <- tryCatch(fn(r), error = function(e) {
-      ap_note("WARN [%s] 表を作れない: %s", r$lblid, conditionMessage(e)); NULL })
+      tlf_miss("[%s] 表を作れない: %s", r$lblid, conditionMessage(e)); NULL })
     ## 1つの宣言が表を複数生む場合（tab_aegr の治療相 × TKI区分）は multi で返る。表番号は
     ## 1つなので HTML は1ファイルに並べ、台帳の row_seq は表をまたぐ通し番号にする（SAS の
     ## %_tlfcells も同じ lblid の2度目以降は続きから振る）
     tabs <- if (!is.null(t) && !is.null(t$multi)) t$multi else
             if (!is.null(t) && length(t$rows)) list(list(tab = t, sfx = "")) else list()
     if (!length(tabs)) {
-      ap_note("WARN [%s] 結果値がない。表を作らない", r$lblid)
+      tlf_miss("[%s] 結果値がない。表を作らない", r$lblid)
       n_skip <- n_skip + 1L; next
     }
     body <- ""
@@ -843,7 +1348,22 @@ for (i in seq_len(nrow(IDX))) {
     xlb <- list()                    # Excel のシートへ積む表（HTML と同じ並び・同じ値）
     for (tt in tabs) {
       tb <- tt$tab
-      ti <- ttl_sub(lab("title", r$lblid), tt$ph, tt$tk)
+      ## ph は ADaM の APHASE の値（C1-1・MAINTENANCE）、tk は部分集団の識別子
+      ## （SS-TKIGRP-DA・SS-TKIGRP-PN）なので、表題には表示名を引いて出す。カタログに
+      ## 無ければ lvl() が識別子を返す（SAS の %tab_aegr も同じ）。治療相は集約区分の
+      ## C1-x・C2-x と個別コースの C1-1 などが別の行としてカタログに並ぶので、キーの
+      ## 等値で引く lvl() をそのまま使う（前方一致にすると取り違える）
+      ti <- ttl_sub(lab("title", r$lblid),
+                    if (is.null(tt$ph)) NULL else lvl(tt$ph),
+                    if (is.null(tt$tk)) NULL else lvl(tt$tk))
+      ## 注記の印（&_n・&_dec など）が置き換わらないまま印字されると、読み手には
+      ## 意味の無い文字列が見える。表 5.4.1 の判定の脚注が実際にこうなっていた
+      ## （2026-08-30 に目視で検出。表示型が脚注を subst_note へ通していなかった）。
+      ## 置き換えられない印を持つ注記は build_note が落とすので、ここまで残っていたら
+      ## 表示型が build_note を通していない。落とさずに止める（C3-204）
+      if (grepl("&_", tb$note, fixed = TRUE))
+        ap_stop(sprintf("%s の注記が置き換えを通っていない（build_note を経由すること）: %s",
+                        r$lblid, tb$note))
       body <- paste0(body,
                      if (length(tabs) > 1L) paste0("<h3>", esc_html(ti), "</h3>\n") else "",
                      html_table(tb),
@@ -852,13 +1372,27 @@ for (i in seq_len(nrow(IDX))) {
       n_tab <- n_tab + 1L
       xlb[[length(xlb) + 1L]] <- list(subtitle = if (length(tabs) > 1L) ti else "",
                                       cols = tb$cols, rows = tb$rows, note = tb$note)
-      ## セル台帳（SAS系との突合に使う）。1行が1セル
+      ## セル台帳（SAS系との突合に使う）。1行が1セル。
+      ## セルを作った ARD の行を指す4つ（解析ID・行の水準・列の群・統計量）を併せて持つ。
+      ## 表番号までしか辿れないと、1つの表番号に多くの解析がぶら下がる表（5.4.7.3 は
+      ## 18ブロック756解析）で、どのセルがどの解析かを読み手が特定できない（C2-068）。
+      ## さらに cell_stats（セルに出た統計量の並び）と key_kind（鍵の読み方）を持つ。
+      ## 複数の ARD 行から作ったセルを1行の由来と読み違えないためで、意味は ky() の頭書き
+      ## （C3-103・C3-104）。表示型が tb$keys を返さないとき（文献値の表や図）は空のままにする
       for (ri in seq_along(tb$rows)) {
         rw <- tb$rows[[ri]]
+        kk <- if (!is.null(tb$keys) && length(tb$keys) >= ri) tb$keys[[ri]] else character(0)
         for (ci in seq_along(rw)) {
+          k <- if (length(kk) >= ci) kk[ci] else ""
+          ## 区切りを6つ足してから割る。strsplit は末尾の空要素を落とすので、最後の要素が
+          ## 空でも6つ揃わせるために鍵の要素数と同じ数を足す
+          part <- strsplit(paste0(k, "||||||"), "|", fixed = TRUE)[[1]]
           cells[[length(cells) + 1L]] <- data.frame(
             lblid = r$lblid, display = r$display, row_seq = roff + ri, row_key = rw[1],
             col_seq = ci, col_label = tb$cols[ci], value = rw[ci],
+            analysis_id = part[1], variable_level = part[2],
+            group1_level = part[3], stat_name = part[4],
+            cell_stats = part[5], key_kind = part[6],
             stringsAsFactors = FALSE)
         }
       }
@@ -868,7 +1402,7 @@ for (i in seq_len(nrow(IDX))) {
       tryCatch(ap_xlsx_table(wb, r$lblid, ttl_sub(lab("title", r$lblid)),
                                 lab("subtitle", r$lblid), xlb, TX),
                error = function(e)
-                 ap_note("WARN [%s] Excel の表を作れない: %s", r$lblid, conditionMessage(e)))
+                 tlf_miss("[%s] Excel の表を作れない: %s", r$lblid, conditionMessage(e)))
     }
   }
   blk <- html_block(r, body)
@@ -879,9 +1413,10 @@ for (i in seq_len(nrow(IDX))) {
                         esc_html(ttl_sub(lab("title", r$lblid))), "</a></li>"))
   xl_entries[[length(xl_entries) + 1L]] <- list(lblid = r$lblid,
                                                 title = ttl_sub(lab("title", r$lblid)))
-  writeLines(html_page(paste0(r$lblid, " ", ttl_sub(lab("title", r$lblid))),
-                       paste0(blk, nav_html(r))),
-             file.path(TLFDIR, paste0(r$lblid, ".html")))
+  if (WRITE_OUT)
+    writeLines(html_page(paste0(r$lblid, " ", ttl_sub(lab("title", r$lblid))),
+                         paste0(blk, nav_html(r))),
+               file.path(TLFDIR, paste0(r$lblid, ".html")))
 }
 
 today <- format(Sys.Date(), "%Y%m%d")
@@ -896,23 +1431,27 @@ whole_html <- paste0("<h1>", esc_html(whole_ttl), "</h1>\n",
                      "</div>\n<ol>\n", paste(toc_parts, collapse = "\n"),
                      "\n</ol>\n</nav>\n",
                      paste(html_parts, collapse = "\n"))
-writeLines(html_page(whole_ttl, whole_html),
-           file.path(TLFDIR, paste0(base, ".html")))
+if (WRITE_OUT)
+  writeLines(html_page(whole_ttl, whole_html),
+             file.path(TLFDIR, paste0(base, ".html")))
 ## Excel は通し読み HTML と同じ名前で同じディレクトリへ置く。日付を名前に持つので、
 ## 直下には最新の1組だけを残し、以前の版は 旧版/ へ退避してある
-if (XLSX) {
+if (WRITE_OUT && XLSX) {
   TX$toc_title <- whole_ttl
   xf <- file.path(TLFDIR, paste0(base, ".xlsx"))
   ok <- tryCatch({ ap_xlsx_finish(wb, xl_entries, xf, TX); TRUE },
                  error = function(e) {
-                   ap_note("WARN [%s] Excel を保存できない: %s", LANG, conditionMessage(e))
+                   tlf_miss("[%s] Excel を保存できない: %s", LANG, conditionMessage(e))
                    FALSE })
   if (ok) ap_note("[%s] Excel: %s（%d シート）", LANG, xf, length(xl_entries))
 }
 cellsdf <- if (length(cells)) bind_rows(cells) else
   data.frame(lblid = character(), display = character(), row_seq = integer(),
              row_key = character(), col_seq = integer(), col_label = character(),
-             value = character())
+             value = character(), analysis_id = character(),
+             variable_level = character(), group1_level = character(),
+             stat_name = character(), cell_stats = character(),
+             key_kind = character())
 ## 台帳の名前で「どの ARD から描いたか」を分ける。突合の相手を間違えないため。
 ##   tlf_cells_r_<言語>.csv     R系の描画 × R系の ARD（PI へ渡す系統そのもの）
 ##   tlf_cells_rsas_<言語>.csv  R系の描画 × SAS系の ARD（描画だけを SAS と比べるとき）
@@ -921,8 +1460,15 @@ cf <- file.path(P$compare, paste0(if (ARDSRC == "sas") "tlf_cells_rsas_" else "t
 write_csv(cellsdf, cf, na = "")
 
 ap_note("[%s] 表 %d / 図 %d / 作らなかった宣言 %d", LANG, n_tab, n_fig, n_skip)
-ap_note("[%s] 通し読み HTML: %s", LANG, file.path(TLFDIR, paste0(base, ".html")))
-ap_note("[%s] 図表ごとの HTML: %s（%d ファイル）", LANG, TLFDIR,
-           length(list.files(TLFDIR, pattern = "^[TF]_.*[.]html$")))
+if (WRITE_OUT) {
+  ap_note("[%s] 通し読み HTML: %s", LANG, file.path(TLFDIR, paste0(base, ".html")))
+  ap_note("[%s] 図表ごとの HTML: %s（%d ファイル）", LANG, TLFDIR,
+             length(list.files(TLFDIR, pattern = "^[TF]_.*[.]html$")))
+  ap_note("[%s] 図の SVG: %s（%d ファイル）", LANG, FIGDIR,
+             length(list.files(FIGDIR, pattern = "^F_.*[.]svg$")))
+} else {
+  ap_note("[%s] SAS 系の ARD から描いたので、図表そのものは書かずセル台帳だけを出す",
+             LANG)
+}
 ap_note("[%s] セル台帳: %s（%d セル）", LANG, cf, nrow(cellsdf))
 }

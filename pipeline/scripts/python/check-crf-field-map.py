@@ -11,6 +11,10 @@
 #   - option_name が crf-option-map.csv に実在するか
 #   - reference_field の参照先の項目が実在するか
 #   - 帳票スラッグが --SPID の実値に現れるか（Box がある端末でだけ実施）
+#
+# 責務の範囲は CRF 項目から SDTM 変数への系譜の参照整合に限る。図表の行数・信頼区間の
+# 方式・Excel チャートの描画は一切見ないので、これが通っても成果物の品質は何も保証
+# されない。検査一覧の区分は docs/validation/plan.md が持つ（C2-005）。
 import sys, os, csv, glob, re, collections
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import boxpath
@@ -129,4 +133,5 @@ for w in warn:
 for e in err:
     print('ERROR:', e)
 print(f'ERROR {len(err)} 件 / WARN {len(warn)} 件')
+print('区分: CRF から SDTM への系譜の参照整合。図表・信頼区間・Excel チャートは対象外')
 sys.exit(1 if err else 0)

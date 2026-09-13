@@ -4,26 +4,43 @@
 # 目視だけでは JS の例外に気付けない（画面は出るが以後クリックが効かない状態になる）ため、
 # 索引を触ったら必ず回す。
 #
-#   python scripts/check-traceability.py                 ... Box の output/deliver/r/traceability.html
+#   python scripts/check-traceability.py                 ... Box の output/tlf/traceability.html
 #   python scripts/check-traceability.py <path.html>     ... 任意のファイル
+#   python scripts/check-traceability.py --allow-skip    ... 材料が無ければ検査せず終える
 #
-# 要 playwright（`pip install playwright && playwright install chromium`）。入っていない端末では
-# その旨を出して終わる（索引の生成自体は playwright に依存しない）。
+# 要 playwright（`pip install playwright && playwright install chromium`）。playwright か索引が
+# 無い端末では、何が無くて何を検査しなかったかを述べて非0で終える。材料が無いまま 0 を返すと、
+# 1件も開かずに索引の段階が通る（C3-124 と同じ形。2026-09-06 に揃えた）。診断のために飛ばすときは
+# --allow-skip。索引の生成自体は playwright に依存しない。
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import boxpath
 sys.stdout.reconfigure(encoding='utf-8')
 
+ALLOW_SKIP = '--allow-skip' in sys.argv[1:]
+ARGS = [a for a in sys.argv[1:] if a != '--allow-skip']
+
+# 材料が無いまま 0 を返すと、1件も開かずに索引の段階が通る（C3-124 と同じ形）。何が無いかを
+# 述べて非0で終え、飛ばすのは診断のために --allow-skip を付けたときだけにする
+lack = []
 try:
     from playwright.sync_api import sync_playwright
 except ImportError:
-    print('playwright が無いため確認を飛ばす（pip install playwright）')
-    sys.exit(0)
+    lack.append('playwright が入っていない'
+                '（pip install playwright && playwright install chromium）')
 
-HTML = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else \
-    os.path.join(boxpath.trial_dir(), 'output', 'deliver', 'r', 'traceability.html')
+HTML = os.path.abspath(ARGS[0]) if ARGS else os.path.join(
+    boxpath.trial_dir(), 'output', 'tlf', 'traceability.html')
 if not os.path.exists(HTML):
-    sys.exit(f'{HTML} が無い。先に build-traceability.py を回す。')
+    lack.append(f'索引が無い（{HTML}。先に build-traceability.py を回す）')
+
+if lack:
+    for x in lack:
+        print('材料が無い: ' + x)
+    if ALLOW_SKIP:
+        print('--allow-skip が付いているので検査せず終える')
+        sys.exit(0)
+    sys.exit('索引をブラウザで開く確認を1件もしていない。飛ばすなら --allow-skip を付ける。')
 
 errs, fails = [], []
 

@@ -26,16 +26,30 @@ sys.stdout.reconfigure(encoding='utf-8')
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # 変換の対象。PI パッケージの 16_1_9_methods に入れる仕様と、変数の spec_ref が指すものを揃える
-# docs からの相対パス。仕様は docs/spec/、固定前の作業計画は docs/tmf/spec/ にある
-FILES = ['spec/sdtm-spec.md', 'spec/adam-spec.md', 'spec/ars-spec-index.md',
-         'spec/analysis-population-derivation.md', 'spec/ard-double-coding-spec.md',
-         'spec/engraftment-external-data-spec.md',
-         'spec/abl1-mutation-external-data-spec.md',
-         'spec/r-pipeline-spec.md', 'spec/label-and-traceability-design.md',
-         'spec/data-handling-decisions.md',
+# docs からの相対パス。仕様は docs/spec/、固定前の作業計画は docs/tmf/spec/ にある。
+#
+# この一覧は試験ごとに書き換える。どの仕様を納品物へ入れるかは、その試験が何を外部データで
+# 補ったか・どの導出に独立した仕様書を立てたかで変わるため、汎用化できるのは「変数の spec_ref が
+# 指す先を漏れなく同梱する」という規則までである。下は試験A の一覧で、新しい試験では
+# docs/metadata/variable-map.csv の spec_ref 列から起こし直す。
+FILES = ['spec/sdtm-spec.md', 'spec/adam-spec.md', 'spec/ard-spec.md',
+         'records/analysis-population-derivation.md', 'validation/ard-double-coding-spec.md',
+         'validation/quality-assurance.md',
+         'input/engraftment-external-data-spec.md',
+         'input/abl1-mutation-external-data-spec.md',
+         'input/post-transplant-therapy-external-data-spec.md',
+         'reporting/traceability-design.md',
+         'decisions/data-handling-decisions.md',
+         # 図表の宣言の設計。ard-spec.md・traceability-design.md が
+         # 正本として指す4箇所があり、同梱しないと本文からリンクが出ない（2026-09-06 に納品対象へ加えた）
+         'spec/tlf-spec.md',
+         # 図表番号（SAP の節番号）と CSR 第14章の番号の対応。README が案内する（C2-101・C2-109）
+         'reporting/csr-section-map.md',
+         # 統計手法と結果の記述（E3 第9節・第11節にあたる草稿。C2-108）
+         'reporting/statistical-methods-and-results.md',
          # adam-spec.md が時間イベントの導出とデータセットの構成の正本として指す2件。
          # 同梱しないと索引の「仕様書」欄からリンクが出ない（2026-08-24 に納品対象へ加えた）
-         'tmf/spec/efs_plan_v0.5.md', 'tmf/spec/analysis_plan_v0.2.md']
+         'records/efs-derivation.md', 'records/analysis-dataset-design.md']
 
 CSS = """
  :root { --line:#e2e2e2; --accent:#004a95; --muted:#767676; --hi:#eef4fb; }
@@ -218,7 +232,7 @@ def main():
     os.makedirs(outdir, exist_ok=True)
 
     have = [f for f in FILES if os.path.exists(os.path.join(REPO, 'docs', f))]
-    # 出力は1階層に平らに並べる。FILES はサブフォルダ付き（`tmf/spec/efs_plan_v0.5.md`）も
+    # 出力は1階層に平らに並べる。FILES はサブフォルダ付き（`spec/efs-derivation.md`）も
     # 取るが、md のリンクはファイル名だけで照合するので、キーもファイル名にそろえる
     names = {f: os.path.basename(os.path.splitext(f)[0]) + '.html' for f in have}
     by_base = {os.path.basename(f): names[f] for f in have}

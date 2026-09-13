@@ -1,6 +1,7 @@
 # build-traceability.py
 #
-# PI 向けのトレーサビリティ索引 output/deliver/r/traceability.html を1ファイルで作る。
+# トレーサビリティ索引を1ファイルで作る。既定の出力先は作業用の
+# output/tlf/traceability.html で、納品パッケージ内の索引は build-pi-package.py が --out で指定する。
 # CSS・JS・データをすべて埋め込み、ブラウザだけで開ける状態にする。
 #
 # 索引は「ノード」と「エッジ」でできている。ノードは追跡の対象（CRF の項目・SDTM の変数・
@@ -12,11 +13,17 @@
 #   ADaM 変数 → 解析        ARD の由来列（src_data・src_var）。取れない解析は変数名の一致（暫定）
 #   解析 → 図表             ARD の output_id と TLF.sas の呼び出し引数
 #
-# ADaM から解析へのエッジは2種類ある。2026-08-20 に ard_ops.sas へ由来列（SRCDATA・SRCVAR）
-# を足したので、data= が ADaM を直に指す解析はその絞り込みごと確定で結べる（画面には
-# where 句を出す）。data= が作業データセット（_ae73・_bgfas 等）を指す解析は、そこから
-# ADaM へ遡る1段を ARD が持たないため、従来どおり変数名の一致で結び暫定と表示する
-# （docs/spec/label-and-traceability-design.md の段階5）。
+# 索引が読むデータの実装系統は R 系にそろえる（2026-08-30 に決定。決定の正本は
+# docs/reporting/traceability-design.md）。納品する図表を書くのは R 系なので、
+# 同じ画面が指す解析値と系譜も R 系から作らないと、PI が見ている数値の出どころが
+# 図表と索引で食い違う。SAS 系は二重コーディングの検証で回すもので、納品物からは参照しない。
+#
+# ADaM から解析へのエッジは、ARD が由来列（src_data・src_var）を持つかどうかで変わる。
+# R 系の ARD は由来列を持たないため、解析項目と ADaM の変数名・実値（PARAMCD 等）の
+# 一致だけで結び、画面には暫定と表示する。由来列を持つ ARD（SAS 系）を読ませたときは、
+# data= が ADaM を直に指す解析を絞り込みごと確定で結び、data= が作業データセット
+# （_ae73・_bgfas 等）を指す解析は ARD.sas の作成手順から ADaM へ遡る
+# （docs/reporting/traceability-design.md の段階5）。
 #
 # 入力
 #   docs/metadata/variable-map.csv          層をまたいだ変数の対応（手で維持する正本）
@@ -24,9 +31,15 @@
 #   docs/metadata/label-catalog.csv         図表の表題・水準・解析項目の表示名
 #   docs/tmf/aCRF/*-acrf.csv       aCRF の帳票名と URL（帳票の並び順もこれが持つ）
 #   program/sas/<試験ID>_TLF.sas 図表の描画宣言（表番号と解析IDの対応）
-#   Box datasets/sas/ard/ard_cards.csv    ARD の実データ（結果値まで）
-#   Box datasets/sas/adam/json/*.json      ADaM の PARAMCD・--SPID の実値（値レベルの条件の引き継ぎ用）
+#   Box datasets/r/ard/ard_cards_r.csv    ARD の実データ（結果値まで）
+#   Box datasets/r/sdtm/json/*.json       SDTM のレコードの型・固定値・値の種類
+#   Box datasets/r/adam/json/*.json       ADaM の PARAMCD・--SPID の実値（値レベルの条件の引き継ぎ用）
+#   Box datasets/define/{sdtm,adam}/define.xml  データセットの構造・キー・CodeList
 #   Box input/rawdata/*.csv        --SPID の実値（ドメインごと）
+#
+# define.xml は R 系も SAS 系も作らない。規制へ出すメタデータは試験に1組しか無いので、
+# 系統別の datasets/sas・datasets/r ではなく datasets/define/<層> に置く
+# （docs/reporting/traceability-design.md「define の置き場」）。
 #
 # 外へ出るリンク（aCRF・図表の HTML）は相対パスだけで作る。索引の隣にある置き場所を実際に
 # 見て、ファイルが実在するものにだけリンクする。絶対 URL（S3）は使わない——フォルダごと別の
@@ -54,10 +67,13 @@ ap.add_argument('--acrf-base',
 ap.add_argument('--tlf-base',
                 help='HTML 版 TLF の置き場所（索引の置き場所から見た相対パス）。'
                      '省略すると索引の隣を探して自動で決める')
+ap.add_argument('--qc-json',
+                help='索引の整合（件数とつながっていない箇所の一覧）を JSON で書き出す。'
+                     '納品パッケージの検証の記録がこれを読む')
 args = ap.parse_args()
 
 BOX = None if args.no_box else boxpath.trial_dir(required=False)
-OUT = args.out or (os.path.join(BOX, 'output', 'deliver', 'r', 'traceability.html') if BOX
+OUT = args.out or (os.path.join(BOX, 'output', 'tlf', 'traceability.html') if BOX
                    else os.path.join(REPO, 'traceability.html'))
 OUTDIR = os.path.dirname(os.path.abspath(OUT))
 
@@ -66,14 +82,13 @@ OUTDIR = os.path.dirname(os.path.abspath(OUT))
 # 渡しても、Box のどこへ置いても切れないようにするため。絶対 URL（S3）は使わない。
 # 置き場所は索引の隣を実際に見て決める。候補は PI パッケージ（ICH E3 の番号）と作業用の
 # output/ の2つの並びで、どちらも同じスクリプトで作れるようにしてある。
-# 作業用の並びでは索引が output/deliver/r/ にあり、図表は output/tlf/r-<言語>/ にある
+# 作業用の並びでは索引が output/tlf/ にあり、図表はその下の r-<言語>/ にある
 # （実装系統と言語でディレクトリを分ける。方針の正本は nnh/trial-planning-and-analysis の
 # pipeline/analysis-pipeline-plan.md「フォルダ構成と命名規則」）。パッケージ内は言語だけで
 # 分ければ足りるので 14_tlf/<言語> のままにする（納品するのは R 系の1系統だけ）。
-ACRF_CAND = ['16_1_2_acrf', 'acrf', os.path.join('..', '..', '..', 'input', 'acrf'),
+ACRF_CAND = ['16_1_2_acrf', 'acrf', os.path.join('..', '..', 'input', 'acrf'),
              os.path.join('..', 'input', 'acrf')]
-TLF_CAND = [os.path.join('14_tlf', 'ja'), os.path.join('..', '..', 'tlf', 'r-ja'),
-            os.path.join('14_tlf', 'en'), os.path.join('..', '..', 'tlf', 'r-en')]
+TLF_CAND = [os.path.join('14_tlf', 'ja'), 'r-ja', os.path.join('14_tlf', 'en'), 'r-en']
 
 
 def resolve_base(given, cands):
@@ -90,11 +105,11 @@ ACRF_BASE = resolve_base(args.acrf_base, ACRF_CAND)
 TLF_BASE = resolve_base(args.tlf_base, TLF_CAND)
 
 # 全図表が1ページに入った HTML（言語ごとに1本）。個別の図表とは別物で、全体像を先に
-# 眺めたいときの入口になる。置き場所はパッケージなら 14_tlf/ 直下、作業用なら索引と同じ
+# 眺めたいときの入口になる。置き場所はパッケージなら 14_tlf/ 直下、作業用なら r-<言語>/
 # フォルダで、名前は <試験ID>_TLF_<日付>_<言語>[_r].html。同じ言語が複数あれば
 # 名前の並びで最後のもの（日付が新しいもの）を採る
 def whole_cands(lang):
-    return ['14_tlf', os.path.join('..', '..', 'tlf', 'r-' + lang), '']
+    return ['14_tlf', 'r-' + lang, '']
 
 
 def whole_tlf(lang):
@@ -111,8 +126,8 @@ WHOLE = {lang: whole_tlf(lang) for lang in ('ja', 'en')}
 # 仕様書の HTML（scripts/build-spec-html.py が docs の md から作るもの）。変数の spec_ref
 # （`sdtm-spec.md §3.7`）と解析の output_id（`Out-5.2.1`）から節へ直接リンクする。節の id は
 # 生成した HTML を実際に読んで拾い、実在する節だけリンクする（無い節へは飛ばさない）
-# パッケージなら 16_1_9_methods、作業用なら output/spec（索引は output/deliver/r/ にある）
-SPEC_CAND = ['16_1_9_methods', 'spec', os.path.join('..', '..', 'spec')]
+# パッケージなら 16_1_9_methods、作業用なら output/spec（索引は output/tlf/ にある）
+SPEC_CAND = ['16_1_9_methods', 'spec', os.path.join('..', 'spec')]
 SPEC_BASE = ''
 SPEC_IDS = {}
 for c in SPEC_CAND:
@@ -128,7 +143,7 @@ for c in SPEC_CAND:
 
 
 def spec_url(ref):
-    """spec_ref（`sdtm-spec.md §3.7`・`ars-spec-index.md Out-5.2.1`）を相対リンクへ。
+    """spec_ref（`sdtm-spec.md §3.7`・`ard-spec.md Out-5.2.1`）を相対リンクへ。
 
     HTML が同梱されていないファイル、節が実在しない参照は空を返す（節だけが無いときは
     ファイルの先頭へ向ける。仕様書そのものは読めた方がよい）。
@@ -255,7 +270,7 @@ for r in rd('crf-option-map.csv'):
 
 # --- 図表（宣言の正本は docs/metadata/tlf-index.csv。表番号 lblid が図表の識別子で、そこから解析へ
 #     繋がる）。2026-08-21 まで TLF.sas を正規表現で解析していたが、SAS 側も CSV から読む
-#     形にしたので同じ正本を読む（docs/spec/tlf-declaration-design.md）---
+#     形にしたので同じ正本を読む（docs/spec/tlf-spec.md）---
 disp = []
 for r in rd('tlf-index.csv'):
     lblid = r['lblid']
@@ -280,7 +295,7 @@ ARD_COLS = ['analysis_id', 'output_id', 'analysis_set', 'data_subset', 'method_i
             'operation_id', 'group1', 'group1_level', 'variable', 'variable_level',
             'context', 'stat_name', 'stat_label', 'stat_type', 'stat_num', 'stat_char',
             'src_data', 'src_var']
-ard_rows, spid, adamv = [], collections.defaultdict(set), {}
+ard_rows, ard_cols, spid, adamv = [], [], collections.defaultdict(set), {}
 dsmeta, dsgrp, ct, items_of = {}, {}, {}, {}
 # ARD の解析項目（`EFS`・`Abdominal pain` など）は ADaM の変数名ではなく、行を識別する値の
 # ほうと一致する。どの列の実値かを持っておき、索引が解析と ADaM を結ぶのに使う。
@@ -379,12 +394,16 @@ def scan_data(json_dir, group_keys):
 
 if BOX:
     NOTKEY = {'STUDYID', 'USUBJID', 'VISIT', 'VISITNUM', 'DOMAIN'}
-    read_define(os.path.join(BOX, 'datasets', 'sas', 'sdtm', 'define.xml'))
-    read_define(os.path.join(BOX, 'datasets', 'sas', 'adam', 'define.xml'))
-    scan_data(os.path.join(BOX, 'datasets', 'sas', 'sdtm', 'json'),
+    # 実データ（SDTM・ADaM・ARD）は納品する図表と同じ R 系から読む。define.xml は
+    # 系統を持たないので datasets/define/ から読む（冒頭の注記）
+    DS_R = os.path.join(BOX, 'datasets', 'r')
+    DS_META = os.path.join(BOX, 'datasets', 'define')
+    read_define(os.path.join(DS_META, 'sdtm', 'define.xml'))
+    read_define(os.path.join(DS_META, 'adam', 'define.xml'))
+    scan_data(os.path.join(DS_R, 'sdtm', 'json'),
               lambda ds, cols: [k for k in dsmeta.get(ds, {}).get('keys', [])
                                 if k not in NOTKEY and not k.endswith('DTC')])
-    scan_data(os.path.join(BOX, 'datasets', 'sas', 'adam', 'json'),
+    scan_data(os.path.join(DS_R, 'adam', 'json'),
               lambda ds, cols: ['PARAMCD'] if 'PARAMCD' in cols else [])
     # ADaM の PARAMCD と --SPID の実値。CRF 項目が持つ値レベルの条件（LBTESTCD='<検査項目>'）を
     # ADaM の行位置（PARAMCD='<検査項目>'）へ言い換えるのに使う。対応表は持たず実値の一致で決める。
@@ -402,10 +421,14 @@ if BOX:
                 if c.endswith('SPID') and isinstance(v, list):
                     sp[c].update(v)
         adamv[ds] = {'paramcd': pc, 'spid': {k: sorted(v) for k, v in sp.items()}}
-    p = os.path.join(BOX, 'datasets', 'sas', 'ard', 'ard_cards.csv')
+    p = os.path.join(DS_R, 'ard', 'ard_cards_r.csv')
     if os.path.exists(p):
         with open(p, encoding='utf-8-sig', newline='') as f:
-            ard_rows = [{c: (r.get(c) or '') for c in ARD_COLS} for r in csv.DictReader(f)]
+            rdr = csv.DictReader(f)
+            # 持つ列は実装系統で違う（R 系は由来列 src_data・src_var を持たない）。
+            # 無い列は空にし、画面へ埋め込む列からも外す
+            ard_cols = [c for c in ARD_COLS if c in (rdr.fieldnames or [])]
+            ard_rows = [{c: (r.get(c) or '') for c in ARD_COLS} for r in rdr]
     for p in sorted(glob.glob(os.path.join(BOX, 'input', 'rawdata', '*.csv'))):
         dom = os.path.basename(p).replace('.csv', '').upper()
         with open(p, encoding='utf-8-sig', newline='') as f:
@@ -417,12 +440,10 @@ if BOX:
                 v = (x[cols[0]] or '').strip()
                 if v:
                     spid[dom].add(v)
-    # データセットのラベルは define.xml に無いので受領時の一覧から取る
-    p = os.path.join(BOX, 'datasets', 'sas', 'sdtm', 'sdtm_datasets.csv')
-    if os.path.exists(p):
-        with open(p, encoding='utf-8-sig', newline='') as f:
-            for r in csv.DictReader(f):
-                dsmeta.setdefault(r['dataset'].upper(), {})['label'] = r['label']
+    # データセットのラベルは define.xml に無いので docs/metadata の正本から取る
+    # （2026-09-05 まで Box の datasets/sas/sdtm/ にあった写しを読んでいた。段E）
+    for r in rd('sdtm_datasets.csv'):
+        dsmeta.setdefault(r['dataset'].upper(), {})['label'] = r['label']
 
 # ARD.sas の作成手順から、作業データセット（_ae73 等）が読んでいる ADaM を辿る。
 # 由来の宣言を手で書く案は採らない（コードが既に持つ事実の写しになりズレる）。生成時に
@@ -479,7 +500,11 @@ def _wds_lineage(path):
     return {w: sorted(resolve(w)) for w in made if w.startswith('_')}
 
 
-WDS = _wds_lineage(os.path.join(REPO, 'program', 'sas', boxpath.trial_id() + '_ARD.sas'))
+# 作業データセットの系譜は SAS 系の書き方（`ads.adsl(...)`・先頭が `_` の作業データセット）に
+# 対応するものなので、由来列がその形をしているときだけ ARD.sas を読む。R 系の ARD は由来列を
+# 持たないため、この経路は使わない
+WDS = (_wds_lineage(os.path.join(REPO, 'program', 'sas', boxpath.trial_id() + '_ARD.sas'))
+       if any(re.match(r'\s*(ads\.|_)', r['src_data']) for r in ard_rows) else {})
 
 
 # ARD の由来列（src_data）から ADaM のデータセット名と where 句を取り出す。
@@ -538,8 +563,8 @@ analyses = [dict(a, g1l=sorted(a['g1l']), vars=sorted(a['vars']),
                  srcds=sorted(a['srcds']), srcw=sorted(a['srcw']),
                  srcv=sorted(a['srcv']), srcvia=sorted(a['srcvia']),
                  srcwds=sorted(a['srcwds']),
-                 ref='ars-spec-index.md ' + a['out'],
-                 refurl=spec_url('ars-spec-index.md ' + a['out'])) for a in an.values()]
+                 ref='ard-spec.md ' + a['out'],
+                 refurl=spec_url('ard-spec.md ' + a['out'])) for a in an.values()]
 n_src = sum(1 for a in analyses if a['srcds'])
 
 # ARD 実データは列を辞書化して埋め込む（行オブジェクトのままだと8MB、辞書化で1MB）
@@ -549,7 +574,7 @@ def encode(vals):
     return [u, [ix[v] for v in vals]]
 
 
-ard_enc = {c: encode([r[c] for r in ard_rows]) for c in ARD_COLS} if ard_rows else {}
+ard_enc = {c: encode([r[c] for r in ard_rows]) for c in ard_cols} if ard_rows else {}
 
 # =========================================================================================
 # 3. 索引の整合（画面の QC 欄に出す。生成物ではなく正本を直すための材料）
@@ -571,7 +596,8 @@ _nprov = sum(1 for a in analyses
 print(f'ADaM と結ぶ解析: 由来列が ADaM を直に指す {_ndef} / 作業データセット経由で辿った '
       f'{_nvia} / 変数名の一致による暫定 {_nprov} / 結べない '
       f'{len(analyses) - _ndef - _nvia - _nprov} / 計 {len(analyses)}'
-      f'。作業データセットの系譜は {len(WDS)} 件を ARD.sas から辿った')
+      + (f'。作業データセットの系譜は {len(WDS)} 件を ARD.sas から辿った' if WDS else
+         '。読んだ ARD が由来列を持たないため、結び付けは変数名と実値の一致による'))
 ard_ids = {a['id'] for a in analyses}
 ard_outs = {a['out'] for a in analyses}
 ard_items = {v for a in analyses for v in a['vars']}
@@ -590,7 +616,7 @@ DATA = {
     'acrfbase': ACRF_BASE, 'tlfbase': TLF_BASE, 'whole': WHOLE, 'specbase': SPEC_BASE,
     'gen': GEN, 'sheets': sheets, 'fields': fields, 'recs': records, 'opts': opts,
     'sdtm': sdtm, 'adam': adam, 'pv': pv,
-    'disp': disp, 'an': analyses, 'ardcols': ARD_COLS if ard_rows else [], 'ard': ard_enc,
+    'disp': disp, 'an': analyses, 'ardcols': ard_cols if ard_rows else [], 'ard': ard_enc,
     'spid': {k: sorted(v) for k, v in spid.items()}, 'adamv': adamv,
     'dsmeta': dsmeta, 'dsgrp': dsgrp, 'ct': ct, 'items': items_of,
     'lv': levels, 'it': items, 'stl': stats,
@@ -615,6 +641,23 @@ for k, v in qc.items():
     print(f'{QCNOTE.get(k, k)}: {len(v)} 件')
     if len(v) <= 12:
         print('  ' + '、'.join(v))
+# 納品パッケージは同じ内容を PI が読める形（検証の記録）へ載せる。ログを目で拾うと写し間違える
+if args.qc_json:
+    os.makedirs(os.path.dirname(os.path.abspath(args.qc_json)), exist_ok=True)
+    json.dump({'qc': qc, 'notes': QCNOTE,
+               'counts': {'帳票': len(sheets), '項目': len(fields),
+                          'SDTM レコード': len(records), 'SDTM 変数': len(sdtm),
+                          'ADaM 変数': len(adam), '解析': len(analyses),
+                          '図表': len(disp), 'ARD 行': len(ard_rows),
+                          '解析と ADaM のつながり（確定）': _ndef,
+                          '解析と ADaM のつながり（作業データセット経由）': _nvia,
+                          '解析と ADaM のつながり（変数名の一致による暫定）': _nprov,
+                          '解析と ADaM が結べない': len(analyses) - _ndef - _nvia - _nprov}},
+              open(args.qc_json, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
+    # ファイル名だけを出す。呼ぶ側（build-pi-package.py）はこの標準出力を検証の
+    # 記録へそのまま載せるので、絶対パスを出すと組み立てた端末の利用者名が
+    # 納品物に残る（2026-08-31 に検出）
+    print(f'索引の整合を書き出した: {os.path.basename(args.qc_json)}')
 
 # ページ本体（HTML・CSS・JS）は scripts/traceability_template.html に置く。
 # データの組み立てと画面の作りを別のファイルに分けておくと、どちらも読みやすい。
@@ -624,9 +667,15 @@ with open(TPL, encoding='utf-8') as f:
 
 html = HTML.replace('__DATA__', json.dumps(DATA, ensure_ascii=False, separators=(',', ':')))
 html = html.replace('__GEN__', GEN)
+# 表題の試験名。雛形は __TRIAL__ を置いておき、ここで docs/metadata/trial.json の値へ差し替える。
+# 雛形へ試験名を直接書くと、その HTML はその試験の外へ出せなくなる
+html = html.replace('__TRIAL__', boxpath.trial_id())
 os.makedirs(OUTDIR, exist_ok=True)
 open(OUT, 'w', encoding='utf-8', newline='\n').write(html)
-print(f'{OUT} を書いた（{os.path.getsize(OUT):,} バイト）')
+# ファイル名だけを出す。呼ぶ側（build-pi-package.py）はこの標準出力を検証の記録へ
+# そのまま載せるので、絶対パスを出すと組み立てた端末の Box の位置が納品物に残る
+# （2026-08-31。C2-219 と同じ経路の残り）
+print(f'{os.path.basename(OUT)} を書いた（{os.path.getsize(OUT):,} バイト）')
 print('全図表1ページ版: ' + ('、'.join(f'{k} {v}' for k, v in WHOLE.items() if v)
                              or '索引の隣に無いためリンクを出さない'))
 if SPEC_BASE:

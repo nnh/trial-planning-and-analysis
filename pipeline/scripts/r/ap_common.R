@@ -2,7 +2,7 @@
 ## program name : ap_common.R
 ## description  : R系パイプライン（CSVtoSDTM・SDTMtoADaM・Compare・ARD）の共通基盤。
 ##                パス解決、Dataset-JSON v1.1 の読み書き、レビュー用CSVの書き出し、
-##                SDTM標準ラベルの辞書、ログを持つ。
+##                変数属性の正本（docs/metadata/variable-map.csv）の読み取り、ログを持つ。
 ## usage        : source(file.path(dirname(sys.frame(1)$ofile), "ap_common.R"))
 ##                または Rscript から source("program/r/ap_common.R")
 ## comment      : PI が SAS を持たずに検証・再現できることを目的とする層。
@@ -31,18 +31,15 @@ ap_script_dir <- function() {
 }
 
 ## 試験固有の値。docs/metadata/trial.json だけが持つ（試験IDと Box の中の置き場）。
-## リポジトリで実行するときと、単独フォルダへ展開した配布形態の両方から探す。
+## 納品パッケージも同じ相対位置に置く（reproduce/ がリポジトリと同じ並びになる）ので、
+## 配布形態のための別の探し先は持たない（2026-08-31）。
 .ap_cfg <- NULL
 ap_trial_config <- function() {
   if (!is.null(.ap_cfg)) return(.ap_cfg)
   d <- ap_script_dir()
   cand <- c(file.path(d, "..", "..", "docs", "metadata", "trial.json"),
             file.path(d, "..", "docs", "metadata", "trial.json"),
-            file.path(d, "docs", "metadata", "trial.json"),
-            ## 単独フォルダへ展開した配布形態。R は平置きで、仕様は input/spec/ にある
-            file.path(d, "input", "spec", "trial.json"),
-            file.path(d, "..", "..", "input", "spec", "trial.json"),
-            file.path(d, "trial.json"))
+            file.path(d, "docs", "metadata", "trial.json"))
   for (p in cand) if (file.exists(p)) {
     .ap_cfg <<- jsonlite::fromJSON(p, simplifyVector = TRUE)
     return(.ap_cfg)
@@ -53,7 +50,7 @@ ap_trial_config <- function() {
 
 ## データルート。次の順で探し、最初に見つかったものを使う。
 ##   1. 環境変数 AKIKO_TRIAL_ROOT
-##   2. スクリプト位置から上へ3階層（単独フォルダへ展開した配布形態）
+##   2. スクリプト位置から上へ辿る（納品パッケージ。program/r から ../.. が reproduce/）
 ##   3. Box（AKIKO_BOX_ROOT、macOS の Box Drive、~/Box、<USERPROFILE>/Box のいずれか配下の、
 ##      docs/metadata/trial.json の box_path が指す場所）
 ## 判定は input/rawdata/DM.csv の存在で行う。データが無い場所を黙って使わないため。
@@ -61,7 +58,7 @@ ap_root <- function(quiet = FALSE) {
   has_data <- function(p) file.exists(file.path(p, "input", "rawdata", "DM.csv"))
   norm <- function(p) normalizePath(p, winslash = "/", mustWork = FALSE)
 
-  ## 出力先を本番から隔離する口。SAS の autoexec.sas と PowerShell が見るのと
+  ## 出力先を本番から隔離する口。SAS の autoexec.sas と runcommon.py が見るのと
   ## 同じ名前にしてある。試験IDから名前を組み立てる形にすると、組み立て方が
   ## 系統ごとに食い違ったときに黙って空振りする（2026-08-29 に一本化）
   e <- Sys.getenv("AKIKO_TRIAL_ROOT")
@@ -156,19 +153,22 @@ ap_mkdir <- function(...) {
   invisible(NULL)
 }
 
-## 仕様ファイル（図表の宣言・表示文言のカタログ）の場所。
-## リポジトリで実行するときは docs/、単独フォルダへ展開した配布形態では input/spec/ を見る。
-## 配布時は docs/ の該当ファイルを input/spec/ へ写して同梱する。
-ap_spec <- function(name, root = ap_root()) {
+## 仕様ファイル（図表の宣言・表示文言のカタログ・受入基準）の場所。
+## 納品パッケージは docs/ の該当ファイルを同じ相対位置へ写して同梱するので、リポジトリで
+## 実行するときと配った先とで探し先が同じになる（2026-08-31。それまでは input/spec/ へ
+## 平らに写しており、読む側が2つの並びを知っている必要があった）。
+ap_spec <- function(name) {
   d <- ap_script_dir()
   ## 機械が読む仕様は docs/metadata/ に置く（下に external/・trial-design/ がある）。
-  ## 単独フォルダへ展開した配布形態では input/spec/ に平らに写すので、そちらを先に見る。
-  ## リポジトリ側は program/r から見た相対と、リポジトリ直下から実行したときの両方を試す
+  ## 機械が読む受入基準は docs/validation/acceptance/ に置く（2026-08-31 に metadata から移した）。
+  ## 納品パッケージも同じ相対位置に置くので、配布形態のための別の探し先は持たない。
+  ## program/r から見た相対（../..）が本筋で、リポジトリ直下や docs の隣から source した
+  ## ときのために d と d/.. も試す。データルートは見ない（仕様を読むだけなら要らない）
   sub <- c(file.path("metadata", name), file.path("metadata", "external", name),
-           file.path("metadata", "trial-design", name), name)
+           file.path("metadata", "trial-design", name),
+           file.path("validation", "acceptance", name), name)
   base <- c(file.path(d, "..", ".."), d, file.path(d, ".."))
-  cand <- c(file.path(root, "input", "spec", name),
-            as.vector(t(outer(base, sub, function(b, s) file.path(b, "docs", s)))))
+  cand <- as.vector(t(outer(base, sub, function(b, s) file.path(b, "docs", s))))
   for (p in cand) if (file.exists(p)) return(normalizePath(p, winslash = "/"))
   stop("仕様ファイルが見つかりません: ", name, "（探した場所: ",
        paste(cand, collapse = " / "), "）")
@@ -281,199 +281,79 @@ ap_dy <- function(dtc, refdt) {
 }
 
 ## ---------------------------------------------------------------------------------
-## SDTM 標準ラベル
+## 変数属性の正本
 ## ---------------------------------------------------------------------------------
-## ラベルの正本は SAS 系では define.xml だが、R 系は独立実装のため自前の辞書を持つ。
-## 突合ではラベルを一致判定の対象にせず参考差分として報告する
-## （docs/spec/r-pipeline-spec.md「突合の対象」）。
+## ラベル・宣言長と ADaM の変数の並びは docs/metadata/variable-map.csv が正本である。
+## 規則は docs/spec/sdtm-spec.md §2.2.2・§2.2.3 と docs/spec/adam-spec.md §11 が持つ。
+## 2026-09-05 まで R 系はここに標準ラベルの辞書を持ち、宣言長を実データの最大バイト長で
+## 代用していた。属性を実装が持つかぎり、その実装を持たない側（R だけの端末、PI の手元）で
+## 値を再現できない。正本を読むのはこの節だけにして、呼び出し側に値を書かせない。
 
-.AP_LABEL_EXACT <- c(
-  STUDYID = "Study Identifier",
-  DOMAIN  = "Domain Abbreviation",
-  USUBJID = "Unique Subject Identifier",
-  SUBJID  = "Subject Identifier for the Study",
-  SITEID  = "Study Site Identifier",
-  RFSTDTC = "Subject Reference Start Date/Time",
-  RFENDTC = "Subject Reference End Date/Time",
-  RFXSTDTC = "Date/Time of First Study Treatment",
-  RFXENDTC = "Date/Time of Last Study Treatment",
-  RFICDTC = "Date/Time of Informed Consent",
-  RFPENDTC = "Date/Time of End of Participation",
-  DTHDTC  = "Date/Time of Death",
-  DTHFL   = "Subject Death Flag",
-  BRTHDTC = "Date/Time of Birth",
-  AGE     = "Age",
-  AGEU    = "Age Units",
-  SEX     = "Sex",
-  RACE    = "Race",
-  ETHNIC  = "Ethnicity",
-  COUNTRY = "Country",
-  ARMCD   = "Planned Arm Code",
-  ARM     = "Description of Planned Arm",
-  ACTARMCD = "Actual Arm Code",
-  ACTARM  = "Description of Actual Arm",
-  EPOCH   = "Epoch",
-  VISITNUM = "Visit Number",
-  VISIT   = "Visit Name",
-  VISITDY = "Planned Study Day of Visit",
-  RDOMAIN = "Related Domain Abbreviation",
-  IDVAR   = "Identifying Variable",
-  IDVARVAL = "Identifying Variable Value",
-  ITEMGROUPDATASEQ = "Record identifier"
-)
+## 名前付きベクトルを作る（stats::setNames に依らない）。
+.ap_named <- function(x, nm) { names(x) <- nm; x }
 
-## ドメイン接頭辞を剥がしたサフィックスに対するラベル。
-.AP_LABEL_SUFFIX <- c(
-  SEQ     = "Sequence Number",
-  SPID    = "Sponsor-Defined Identifier",
-  GRPID   = "Group ID",
-  REFID   = "Reference ID",
-  LNKID   = "Link ID",
-  LNKGRP  = "Link Group ID",
-  TESTCD  = "Short Name of Measurement, Test or Examination",
-  TEST    = "Name of Measurement, Test or Examination",
-  TERM    = "Reported Term for the Event",
-  DECOD   = "Dictionary-Derived Term",
-  TRT     = "Reported Name of Intervention",
-  CAT     = "Category",
-  SCAT    = "Subcategory",
-  OBJ     = "Object of the Observation",
-  ORRES   = "Result or Finding as Collected",
-  ORRESU  = "Original Units",
-  ORNRLO  = "Reference Range Lower Limit in Orig Unit",
-  ORNRHI  = "Reference Range Upper Limit in Orig Unit",
-  STRESC  = "Character Result/Finding in Std Format",
-  STRESN  = "Numeric Result/Finding in Standard Units",
-  STRESU  = "Standard Units",
-  STNRLO  = "Reference Range Lower Limit-Std Units",
-  STNRHI  = "Reference Range Upper Limit-Std Units",
-  STAT    = "Completion Status",
-  REASND  = "Reason Not Done",
-  NAM     = "Vendor Name",
-  SPEC    = "Specimen Type",
-  METHOD  = "Method of Test or Examination",
-  BLFL    = "Baseline Flag",
-  LOC     = "Location of the Observation",
-  EVAL    = "Evaluator",
-  RESCAT  = "Result Category",
-  OCCUR   = "Occurrence",
-  PRESP   = "Pre-Specified",
-  MOOD    = "Mood",
-  DOSE    = "Dose",
-  DOSU    = "Dose Units",
-  DOSFRM  = "Dose Form",
-  DOSFRQ  = "Dosing Frequency per Interval",
-  ROUTE   = "Route of Administration",
-  ADJ     = "Reason for Dose Adjustment",
-  INDC    = "Indication",
-  DUR     = "Duration",
-  DTC     = "Date/Time of Collection",
-  STDTC   = "Start Date/Time",
-  ENDTC   = "End Date/Time",
-  DY      = "Study Day of Visit/Collection/Exam",
-  STDY    = "Study Day of Start",
-  ENDY    = "Study Day of End",
-  TPT     = "Planned Time Point Name",
-  TPTNUM  = "Planned Time Point Number",
-  ENRTPT  = "End Relative to Reference Time Point",
-  ENTPT   = "End Reference Time Point",
-  VAL     = "Comment",
-  SER     = "Serious Event",
-  ACN     = "Action Taken with Study Treatment",
-  REL     = "Causality",
-  OUT     = "Outcome of Adverse Event",
-  TOXGR   = "Standard Toxicity Grade",
-  SEV     = "Severity/Intensity",
-  BODSYS  = "Body System or Organ Class",
-  BDSYCD  = "Body System or Organ Class Code",
-  LLT     = "Lowest Level Term",
-  LLTCD   = "Lowest Level Term Code",
-  PTCD    = "Preferred Term Code",
-  HLT     = "High Level Term",
-  HLTCD   = "High Level Term Code",
-  HLGT    = "High Level Group Term",
-  HLGTCD  = "High Level Group Term Code",
-  SOC     = "Primary System Organ Class",
-  SOCCD   = "Primary System Organ Class Code",
-  SCONG   = "Congenital Anomaly or Birth Defect",
-  SDISAB  = "Persist or Signif Disability/Incapacity",
-  SDTH    = "Results in Death",
-  SHOSP   = "Requires or Prolongs Hospitalization",
-  SLIFE   = "Is Life Threatening",
-  SOD     = "Occurred with Overdose",
-  SMIE    = "Other Medically Important Serious Event"
-)
+.ap_varmap <- NULL
+ap_var_map <- function() {
+  if (!is.null(.ap_varmap)) return(.ap_varmap)
+  d <- utils::read.csv(ap_spec("variable-map.csv"), colClasses = "character",
+                       check.names = FALSE, stringsAsFactors = FALSE)
+  names(d) <- trimws(names(d))
+  need <- c("layer", "dataset", "variable", "label_en", "length", "order")
+  if (!all(need %in% names(d)))
+    ap_stop("variable-map.csv に列がありません: %s",
+            paste(setdiff(need, names(d)), collapse = "・"))
+  .ap_varmap <<- d
+  d
+}
 
-## ドメイン固有ラベル。標準サフィックスでは説明が足りないものだけを持つ。
-.AP_LABEL_DOMAIN <- list(
-  DD = c(DDTESTCD = "Death Detail Assessment Short Name",
-         DDTEST   = "Death Detail Assessment Name"),
-  DS = c(DSTERM   = "Reported Term for the Disposition Event",
-         DSDECOD  = "Standardized Disposition Term",
-         DSCAT    = "Category for Disposition Event",
-         DSSTDTC  = "Start Date/Time of Disposition Event"),
-  CE = c(CETERM   = "Reported Term for the Clinical Event",
-         CEDECOD  = "Dictionary-Derived Clinical Event Term",
-         CEOCCUR  = "Clinical Event Occurrence",
-         CEPRESP  = "Clinical Event Pre-specified"),
-  AE = c(AETERM   = "Reported Term for the Adverse Event",
-         AEDECOD  = "Dictionary-Derived Term",
-         AESTDTC  = "Start Date/Time of Adverse Event",
-         AEENDTC  = "End Date/Time of Adverse Event"),
-  MH = c(MHTERM   = "Reported Term for the Medical History",
-         MHDECOD  = "Dictionary-Derived Term",
-         MHOCCUR  = "Medical History Occurrence",
-         MHPRESP  = "Medical History Event Pre-Specified"),
-  CM = c(CMTRT    = "Reported Name of Drug, Med, or Therapy",
-         CMDECOD  = "Standardized Medication Name",
-         CMOCCUR  = "CM Occurrence",
-         CMPRESP  = "CM Pre-specified",
-         CMDUR    = "Duration of Treatment"),
-  EC = c(ECTRT    = "Name of Treatment",
-         ECMOOD   = "Mood",
-         ECOCCUR  = "Occurrence",
-         ECPRESP  = "Pre-Specified",
-         ECDOSE   = "Dose per Administration",
-         ECADJ    = "Reason for Dose Adjustment"),
-  PR = c(PRTRT    = "Reported Name of Procedure",
-         PROCCUR  = "Procedure Occurrence",
-         PRPRESP  = "Procedure Pre-specified",
-         PRINDC   = "Indication"),
-  RS = c(RSTESTCD = "Response Assessment Short Name",
-         RSTEST   = "Response Assessment Name",
-         RSEVAL   = "Evaluator"),
-  FA = c(FATESTCD = "Findings About Test Short Name",
-         FATEST   = "Findings About Test Name",
-         FAOBJ    = "Object of the Observation"),
-  MB = c(MBTESTCD = "Microbiology Test or Finding Short Name",
-         MBTEST   = "Microbiology Test or Finding Name",
-         MBRESCAT = "Result Category"),
-  QS = c(QSTESTCD = "Question Short Name",
-         QSTEST    = "Question Name"),
-  LB = c(LBTESTCD = "Lab Test or Examination Short Name",
-         LBTEST   = "Lab Test or Examination Name"),
-  VS = c(VSTESTCD = "Vital Signs Test Short Name",
-         VSTEST   = "Vital Signs Test Name"),
-  CO = c(COVAL    = "Comment",
-         COSPID   = "Sponsor-Defined Identifier")
-)
+## 1データセット分の属性。変数名を名前に持つベクトル3本で返す。
+ap_var_attr <- function(layer, dataset) {
+  d <- ap_var_map()
+  d <- d[d$layer == tolower(layer) & toupper(d$dataset) == toupper(dataset), , drop = FALSE]
+  if (!nrow(d))
+    ap_stop("variable-map.csv に %s/%s の行がありません（属性の正本）。",
+            tolower(layer), toupper(dataset))
+  v <- toupper(trimws(d$variable))
+  list(label  = .ap_named(trimws(d$label_en), v),
+       length = .ap_named(suppressWarnings(as.integer(d$length)), v),
+       order  = .ap_named(suppressWarnings(as.integer(d$order)), v))
+}
 
-## 変数1つのラベルを返す。ドメイン固有 → 完全一致 → サフィックスの順で引く。
-ap_label <- function(varname, domain = NULL) {
-  vn <- toupper(varname)
-  if (!is.null(domain)) {
-    dl <- .AP_LABEL_DOMAIN[[toupper(domain)]]
-    if (!is.null(dl) && vn %in% names(dl)) return(unname(dl[vn]))
+## ADaM の列を variable-map.csv の order で並べる（docs/spec/adam-spec.md §11）。
+## SDTM は標準が並びを定めるので ap_load_var_order() を使う。
+## order に無い列を黙って末尾へ置くと宣言の抜けが出力から見えないので警告を出す。
+ap_order_vars <- function(df, layer, dataset) {
+  o <- ap_var_attr(layer, dataset)$order
+  o <- o[!is.na(o)]
+  if (!length(o))
+    ap_stop("variable-map.csv の %s/%s に order がありません。",
+            tolower(layer), toupper(dataset))
+  head <- names(sort(o))
+  head <- head[head %in% names(df)]
+  tail <- setdiff(names(df), head)
+  if (length(tail))
+    ap_warn("[%s] order が宣言されていない列を末尾へ置いた（%d 件）: %s",
+            toupper(dataset), length(tail), paste(tail, collapse = ", "))
+  df[, c(head, tail), drop = FALSE]
+}
+
+## データセットのラベルと OID の正本は docs/metadata/sdtm_datasets.csv（受領 define.xml
+## 由来。docs/spec/sdtm-spec.md §2.1）。ドメインのラベルは SDTMIG の版で文言が変わるので
+## 実装へ書かない。
+.ap_dsmeta <- NULL
+ap_dataset_meta <- function(dataset = NULL) {
+  if (is.null(.ap_dsmeta)) {
+    d <- utils::read.csv(ap_spec("sdtm_datasets.csv"), colClasses = "character",
+                         check.names = FALSE, stringsAsFactors = FALSE)
+    names(d) <- trimws(names(d))
+    d$dataset <- toupper(trimws(d$dataset))
+    .ap_dsmeta <<- d
   }
-  if (vn %in% names(.AP_LABEL_EXACT)) return(unname(.AP_LABEL_EXACT[vn]))
-  if (!is.null(domain)) {
-    d <- toupper(domain)
-    if (startsWith(vn, d) && nchar(vn) > nchar(d)) {
-      sfx <- substring(vn, nchar(d) + 1)
-      if (sfx %in% names(.AP_LABEL_SUFFIX)) return(unname(.AP_LABEL_SUFFIX[sfx]))
-    }
-  }
-  vn
+  if (is.null(dataset)) return(.ap_dsmeta)
+  r <- .ap_dsmeta[.ap_dsmeta$dataset == toupper(dataset), , drop = FALSE]
+  if (nrow(r) != 1L)
+    ap_stop("sdtm_datasets.csv に %s の行が %d 件あります。", toupper(dataset), nrow(r))
+  as.list(r[1, ])
 }
 
 ## ---------------------------------------------------------------------------------
@@ -488,8 +368,15 @@ AP_DATASETJSON_VERSION <- "1.1.0"
 ## 列の値と変数名から Dataset-JSON の dataType を決める。
 ## SDTM 層は日付を ISO 8601 の文字列のまま保持する（docs/spec/sdtm-spec.md §2.3）ため、
 ## --DTC 系は値の型ではなく変数名で date と判定する。
-## 整数として扱う変数（--SEQ・--DY・VISITNUM・AGE・MedDRAコード・基準範囲）は integer、
-## 残る数値は float、それ以外は string。
+## integer にするのは、定義の上で整数しか取らない変数（--SEQ・--DY・VISITNUM・AGE・
+## MedDRA コード）だけとし、残る数値は float、それ以外は string とする。
+## 基準範囲（--STNRLO・--STNRHI）は検査値と同じ尺度を持つので小数を取り得る。
+## 2026-09-06 まで名前だけで integer としていたため、Dataset-JSON から読み戻す側が
+## 定量域の下限 0.01 を 0 に丸め、分子遺伝学的効果の判定が1件 NQ から DT へ動いた。
+## 名前の規則を「float と言い切れるものだけ float」から「integer と言い切れるものだけ
+## integer」へ反転させた。同じ規則を SAS 側（<試験ID>_SDTMtoJSON.sas）と
+## define.xml（scripts/update-define-xml.py）が持つ。3実装の一致は
+## scripts/check-datatype-rule.py が見る。
 ## mode="adam" では数値をすべて float とする。ADaM 層は define.xml を持たず、
 ## 整数か否かの区別が突合の役に立たないため。ただし ITEMGROUPDATASEQ は Dataset-JSON が
 ## レコード識別子として定める連番の列なので、層を問わず integer にする（SAS 側と同じ）。
@@ -500,20 +387,11 @@ ap_datatype <- function(x, varname = "", mode = "sdtm") {
   if (mode == "adam") return(if (is.numeric(x)) "float" else "string")
   if (grepl("DTC$", vn)) return("date")
   if (is.numeric(x)) {
-    if (grepl("(SEQ|DY|STDY|ENDY|TPTNUM)$", vn)) return("integer")
+    if (grepl("(SEQ|DY|TPTNUM|LLTCD|PTCD|HLTCD|HLGTCD|BDSYCD|SOCCD)$", vn)) return("integer")
     if (vn %in% c("VISITNUM", "AGE", "TAETORD")) return("integer")   # TAETORD は要素の順序で整数
-    if (grepl("(LLTCD|PTCD|HLTCD|HLGTCD|BDSYCD|SOCCD|STNRLO|STNRHI)$", vn)) return("integer")
     return("float")
   }
   "string"
-}
-
-## 文字列列のバイト長の最大値。Dataset-JSON の length に入れる。
-ap_maxlen <- function(x) {
-  v <- ap_chr(x)
-  if (!length(v)) return(1L)
-  m <- max(nchar(v, type = "bytes"), 0L)
-  as.integer(max(m, 1L))
 }
 
 ## Dataset-JSON を1本書き出す。
@@ -521,12 +399,15 @@ ap_maxlen <- function(x) {
 ##   path     : 出力パス
 ##   domain   : ドメイン名／データセット名（大文字）
 ##   ds_label : データセットのラベル
-##   labels   : 名前付き文字ベクトル。列ラベルを明示するときに渡す
+##   mode     : 層（"sdtm" / "adam"）。dataType の決め方と、属性の正本
+##     （variable-map.csv の layer）の引き先を兼ねる
 ##   itemgrp  : itemGroupOID の接頭辞（SDTM は "IG."、ADaM も同じ）
 ##   study_oid・mdv_oid・file_oid_prefix : 試験の OID。既定値を持たせない。
 ##     試験の値を汎用の部品に埋めると、次の試験が黙って別の試験の OID を出す
+## ラベル・宣言長は引数で受けない。呼び出し側から流し込めるようにすると、正本を読む
+## 場所が呼び出しの数だけ増える（2026-09-05 に labels 引数を外した）。
 ap_write_dataset_json <- function(df, path, domain, ds_label,
-                                     labels = NULL, originator = "R", mode = "sdtm",
+                                     originator = "R", mode = "sdtm",
                                      study_oid, mdv_oid, file_oid_prefix) {
   domain <- toupper(domain)
   ap_mkdir(dirname(path))
@@ -536,17 +417,28 @@ ap_write_dataset_json <- function(df, path, domain, ds_label,
   if (n == 0L) seqcol <- data.frame(ITEMGROUPDATASEQ = integer(0))
   d <- cbind(seqcol, df)
 
+  ## ラベルと宣言長は variable-map.csv から引く。itemOID は必ずデータセットで修飾する
+  ## （docs/spec/sdtm-spec.md §2.2.2・§2.2.3）。宣言が無い列は黙って通さない。
+  va <- ap_var_attr(mode, domain)
   cols <- lapply(names(d), function(v) {
     x  <- d[[v]]
     dt <- ap_datatype(x, v, mode)
-    lb <- if (!is.null(labels) && v %in% names(labels)) unname(labels[v]) else
-          if (v == "ITEMGROUPDATASEQ") "Record identifier" else ap_label(v, domain)
-    oid <- if (v == "ITEMGROUPDATASEQ") "ITEMGROUPDATASEQ"
-           else if (v %in% c("STUDYID", "USUBJID")) paste0("IT.", v)
-           else paste0("IT.", domain, ".", v)
-    out <- list(itemOID = unbox(oid), name = unbox(v),
-                label = unbox(lb), dataType = unbox(dt))
-    if (dt %in% c("string", "date")) out$length <- unbox(ap_maxlen(x))
+    if (v == "ITEMGROUPDATASEQ")
+      return(list(itemOID = unbox("ITEMGROUPDATASEQ"), name = unbox(v),
+                  label = unbox("Record identifier"), dataType = unbox(dt)))
+    vu <- toupper(v)
+    if (!vu %in% names(va$label))
+      ap_stop("variable-map.csv に %s/%s.%s の行がありません（属性の正本）。",
+              tolower(mode), domain, vu)
+    out <- list(itemOID = unbox(paste0("IT.", domain, ".", vu)), name = unbox(v),
+                label = unbox(va$label[[vu]]), dataType = unbox(dt))
+    if (dt %in% c("string", "date")) {
+      L <- va$length[[vu]]
+      if (is.na(L))
+        ap_stop("variable-map.csv の %s/%s.%s に length がありません（%s 型）。",
+                tolower(mode), domain, vu, dt)
+      out$length <- unbox(as.integer(L))
+    }
     out
   })
 
@@ -645,17 +537,15 @@ ap_write_review_csv <- function(df, path) {
 ## ---------------------------------------------------------------------------------
 ## 変数順
 ## ---------------------------------------------------------------------------------
-## SDTM の標準変数順は input/ext/sdtm_variable_order.csv が持つ
-## （docs/spec/sdtm-spec.md §2.2.1）。無い場合は警告を出して現在の順のまま返す。
+## SDTM の標準変数順は docs/metadata/external/sdtm_variable_order.csv が持つ
+## （docs/spec/sdtm-spec.md §2.2.1）。CDISC ライブラリからの抽出物で、2026-09-05 に
+## Box の input/ext から外部標準の写しの置き場へ移した（git 管理外だったため、R だけの
+## 端末では正本が手元に無かった）。プログラムと同じリポジトリに入ったので、無い場合に
+## 受領CSVの順で出す逃げ道は持たない。
 
-ap_load_var_order <- function(ext_dir) {
-  f <- file.path(ext_dir, "sdtm_variable_order.csv")
-  if (!file.exists(f)) {
-    ap_warn("sdtm_variable_order.csv がありません。変数順は受領CSVの順のままにします。")
-    return(NULL)
-  }
-  d <- utils::read.csv(f, colClasses = "character", check.names = FALSE,
-                       stringsAsFactors = FALSE)
+ap_load_var_order <- function() {
+  d <- utils::read.csv(ap_spec("sdtm_variable_order.csv"), colClasses = "character",
+                       check.names = FALSE, stringsAsFactors = FALSE)
   names(d) <- toupper(trimws(names(d)))
   d
 }

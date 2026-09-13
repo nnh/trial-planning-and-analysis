@@ -29,14 +29,30 @@ def config():
     except FileNotFoundError:
         raise SystemExit('\n'.join([
             f'試験の設定が無い: {CONFIG}',
-            '次の形で作る:',
-            '  {"trial_id": "<試験ID>", "box_path": ["Stat", "Trials", "<グループ>", "<試験ID>"]}',
+            '次の形で作る（列の定義は templates/README.md）:',
+            '  {"trial_id": "<試験ID>",',
+            '   "box_path": ["Stat", "Trials", "<グループ>", "<試験ID>"],',
+            '   "received_define": ["input", "rawdata", "<固定データのフォルダ>",',
+            '                       "<受領 define.xml のフォルダ>"],',
+            '   "define": {"study_description": "<試験の説明（英語）>",',
+            '              "protocol_name": "<研究計画書の名称>",',
+            '              "originator": "<作成者>"}}',
         ]))
 
 
 def trial_id():
     """プログラム名・パッケージ名・表題に使う試験の識別子"""
     return config()['trial_id']
+
+
+def received_define_rel():
+    """受領 define.xml のフォルダ（受領物の根からの相対パス）。
+
+    define.xml を作る側（update-define-xml.py）と納品パッケージへ写す側
+    （build-pi-package.py）の両方が要るので、trial.json の1か所が持つ。
+    固定データの回とデータセンターが付けたフォルダ名がそのまま出どころの記録になる。
+    """
+    return os.path.join(*config()['received_define'])
 
 
 TRIAL = os.path.join(*config()['box_path'])

@@ -1,8 +1,13 @@
 /*****************************************************************************************
 program name : export-sdtm-metadata.sas
 description  : datasets/sas/sdtm の変数メタデータ（ドメイン・変数名・型・長さ・順序）を CSV へ出す。
-               scripts/update-define-xml.ps1 が define.xml を更新するときの入力になる。
 usage        : autoexec.sas を実行した状態で submit する。
+comment      : 現行の経路では使わない。2026-09-05 に define.xml の生成を実装系統から切り離し、
+               scripts/update-define-xml.py が読むのは受領 define.xml と docs/metadata/ の宣言
+               だけになった（変数の集合・ラベル・宣言長は docs/metadata/variable-map.csv、
+               SDTM IG の Role とラベルはスキル cdisc-define-xml の export-sdtm-metadata.py）。
+               この SAS 版は、その切り離しより前の作り方を残してあるもので、試験側では既に
+               落としてある。新しい試験の出発点にしない。
 output       : <Box>/datasets/sas/sdtm/sdtm_variables.csv・sdtm_valuelevel.csv・sdtm_codelist_sync.csv
 *****************************************************************************************/
 
@@ -22,7 +27,7 @@ proc export data=_meta outfile=_o dbms=csv replace;
 run;
 filename _o clear;
 
-/* 値水準メタデータ用の --TESTCD → --TEST の対応。update-define-xml.ps1 が
+/* 値水準メタデータ用の --TESTCD → --TEST の対応。update-define-xml.py が
    ValueList の ItemDef を実データに合わせるのに使う。--ORRES の値水準を持つ
    ドメインだけを対象にする（docs/records/sdtm-conformance-findings-20260815.md D-1） */
 %let vlm_dom = LB FA RS VS DD MB QS;
@@ -65,7 +70,7 @@ filename _v clear;
              未使用の選択肢も CRF としては正しいので落とさない。
 
    対象外の変数の CodeList は受領版のままにする。対象を増やすときはこのリストに足す
-   （update-define-xml.ps1 はこの CSV に出てくる変数だけを対象にする）。
+   （update-define-xml.py はこの CSV に出てくる変数だけを対象にする）。
    docs/spec/sdtm-spec.md 3.6（FATESTCD 是正）・4.1・4.2（外部データ由来の値）を参照。
    LB:VISIT は受領 define.xml が VISITNUM の数値 CodeList を割り当てているための是正。
    他のドメインの VISIT は受領版のまま CodeList を持たない。
