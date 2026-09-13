@@ -8,6 +8,10 @@
 # 「CORE が無いので SDTM の検証が回せない」と分かる。依存の不足は、データを作り始める前に
 # まとめて出す。
 #
+# 立案の端末だけでなく、解析を回す端末の要件も見る。実行の入口を移したときに実行機の側が
+# 追随せず、16日後に初めてリモートで回して5つの不足に一度に突き当たったことがある
+# （findings/analysis-findings-log.md「実行の入口を移したとき、実行機の側が追随しない」）。
+#
 # 試験のリポジトリが無くても動く。試験の設定（trial.json）も Box も読まない。
 #
 # 使い方
@@ -16,6 +20,7 @@
 #
 # 終了コード 0 必須がそろっている / 1 必須が欠けている / 2 検査自体が走らなかった
 import argparse
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -29,11 +34,47 @@ ENV_KEYS = {
     'CDISC_CORE_EXE': 'CDISC CORE の実行ファイル',
     'CDISC_DEFINE_XML_SKILL': 'cdisc-define-xml スキルの置き場',
     'TRIAL_REVIEW_DIR': '枠組みの review/ の置き場',
+    'PLAYWRIGHT_BROWSERS_PATH': 'playwright が入れたブラウザの置き場',
 }
 
 
 def which(name):
     return shutil.which(name)
+
+
+def has_module(name):
+    """この検査を走らせている処理系で import できるか。
+
+    別の python を呼んで確かめない。検査スクリプトもこの処理系で動くので、
+    ここで見えないものはそちらでも見えない。PATH に複数の python が居る端末で、
+    入っている方を見て「有る」と報告するのを避ける。
+    """
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def chromium_dir():
+    """playwright が落としたブラウザを探す。
+
+    パッケージだけ入れて `playwright install chromium` を回していない端末がある。
+    その状態でも import は通るので、パッケージの有無だけでは足りない。
+    既定の置き場は OS ごとに違い、PLAYWRIGHT_BROWSERS_PATH で変えられる。
+    """
+    env = os.environ.get('PLAYWRIGHT_BROWSERS_PATH')
+    cands = [env] if env else [
+        os.path.join(HOME, 'AppData', 'Local', 'ms-playwright'),
+        os.path.join(HOME, 'Library', 'Caches', 'ms-playwright'),
+        os.path.join(HOME, '.cache', 'ms-playwright'),
+    ]
+    for d in cands:
+        if not d or not os.path.isdir(d):
+            continue
+        for name in sorted(os.listdir(d)):
+            if name.startswith('chromium-'):
+                return os.path.join(d, name)
+    return None
 
 
 def version(cmd):
@@ -70,6 +111,17 @@ def main():
     check(rows, True, 'R（Rscript）', bool(r), version(['Rscript', '--version']) or r or '',
           'R 系の生成が回せない。二重コーディングの片系統が作れない')
 
+    # R から make が見えるか。CRAN に版に対応するバイナリが無いパッケージは
+    # ソースからのビルドになるので、これが無いと renv の復元が途中で止まる。
+    # Windows は Rtools、macOS は Xcode のコマンドラインツールが make を持つ。
+    # 見ているのは「R から make が見えるか」だけで、ビルドが通ることまでは確かめていない。
+    make = version(['Rscript', '-e', 'cat(Sys.which("make"))']) if r else None
+    check(rows, False, 'R のビルド道具（make）', bool(make),
+          make or ('Rtools（Windows）・xcode-select --install（macOS）' if r
+                   else 'R が無いので確かめていない'),
+          'CRAN にバイナリが無いパッケージをソースからビルドできない。'
+          'renv の復元が途中で止まる')
+
     sas_home = os.environ.get('SAS_HOME') or r'C:\Program Files\SASHome\SASFoundation\9.4'
     sas_exe = os.path.join(sas_home, 'sas.exe')
     check(rows, False, 'SAS', os.path.isfile(sas_exe), sas_exe,
@@ -80,6 +132,28 @@ def main():
         HOME, 'opt', 'cdisc-core', 'core', 'core.exe')
     check(rows, False, 'CDISC CORE', os.path.isfile(core), core,
           'SDTM の適合性検証が回せない。区間2の出口条件を満たせない')
+
+    # 検査の3本だけが外部パッケージを要る。生成と実行の経路は標準ライブラリで動く
+    # （pipeline/README.md「実行できる形」）。無い端末では検査が終了コード2で
+    # 「検証できなかった」と返すので、合格と紛れることはないが、回せば止まる。
+    check(rows, False, 'jsonschema', has_module('jsonschema'),
+          'python -m pip install jsonschema',
+          'ReportingEvent を ARS の標準スキーマで検証できない（check-ars-json.py）')
+
+    pw = has_module('playwright')
+    in_package = os.environ.get('PLAYWRIGHT_BROWSERS_PATH') == '0'
+    chrome = chromium_dir() if pw else None
+    if not pw:
+        pw_detail = 'python -m pip install playwright && playwright install chromium'
+    elif chrome:
+        pw_detail = chrome
+    elif in_package:
+        pw_detail = 'パッケージの中に置く指定（PLAYWRIGHT_BROWSERS_PATH=0）。置き場は見ていない'
+    else:
+        pw_detail = 'パッケージはあるがブラウザが無い（playwright install chromium）'
+    check(rows, False, 'playwright', pw and (bool(chrome) or in_package), pw_detail,
+          '索引のリンク検査と図表の視覚回帰が回せない（check-traceability.py・'
+          'check-visual-regression.py）。成果物の検査の段が通らない')
 
     skills_dir = os.path.join(HOME, '.claude', 'skills')
     check(rows, True, '~/.claude/skills', os.path.isdir(skills_dir), skills_dir,
