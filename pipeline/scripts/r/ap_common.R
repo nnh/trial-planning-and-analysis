@@ -463,11 +463,31 @@ ap_write_dataset_json <- function(df, path, domain, ds_label,
 
   json <- toJSON(obj, dataframe = "values", na = "null", null = "null",
                  digits = NA, pretty = 2, auto_unbox = FALSE)
-  ## BOM を付けない（CDISC CORE の JSON パーサが読めないため。docs/spec/sdtm-spec.md §6.1）
-  con <- file(path, open = "wb")
-  on.exit(close(con))
-  writeBin(charToRaw(as.character(json)), con)
+  ## BOM を付けない（CDISC CORE の JSON パーサが読めないため）
+  raw <- charToRaw(as.character(json))
+  ap_write_raw_verified(path, raw)
   invisible(path)
+}
+
+## 書いたバイト数がそのまま残っていることを確かめてから返す。
+##
+## クラウド同期のフォルダ（Box Drive 等）では、書き込みが成功して close も通ったのに、
+## 直後にファイルが 0 バイトのままのことがある。層の出力フォルダへ最初に書く1本で起きやすい。
+## 0 バイトのまま次の段へ渡ると、読み手が JSON の「premature EOF」で落ちるため、原因が
+## 書き手ではなく読み手の側に見える。書いた直後にサイズを確かめ、合わなければ間を置いて
+## 書き直し、それでも駄目なら止める。黙って 0 バイトを残さない。
+ap_write_raw_verified <- function(path, raw, tries = 5L) {
+  want <- length(raw)
+  for (i in seq_len(tries)) {
+    con <- file(path, open = "wb")
+    writeBin(raw, con)
+    close(con)
+    got <- file.size(path)
+    if (!is.na(got) && got == want) return(invisible(path))
+    Sys.sleep(i)
+  }
+  ap_stop("書き込みが完了しません（%d バイトのはずが %s）: %s",
+          want, format(file.size(path)), path)
 }
 
 ## Dataset-JSON を data.frame として読む。列の型は columns の dataType に従う。
@@ -524,13 +544,11 @@ ap_write_review_csv <- function(df, path) {
     x <- d[[v]]
     if (inherits(x, "Date")) d[[v]] <- format(x, "%Y-%m-%d")
   }
-  con <- file(path, open = "wb")
-  on.exit(close(con))
-  writeBin(charToRaw("﻿"), con)
   tf <- tempfile(fileext = ".csv")
   utils::write.csv(d, tf, row.names = FALSE, na = "", fileEncoding = "UTF-8")
-  writeBin(readBin(tf, "raw", file.info(tf)$size), con)
+  body <- readBin(tf, "raw", file.info(tf)$size)
   unlink(tf)
+  ap_write_raw_verified(path, c(charToRaw("﻿"), body))
   invisible(path)
 }
 
