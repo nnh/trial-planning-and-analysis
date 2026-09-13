@@ -1,7 +1,7 @@
 # SDTM 適合性検証
 
 作成日：2026-08-15
-改訂日：2026-08-22
+改訂日：2026-09-13
 
 ## 目的
 
@@ -156,7 +156,7 @@ CORE は XPT・Dataset-JSON・NDJSON・XLSX・CSV を受け付けるが、実際
 - 受領データ側の問題も検出した。同意日が試験治療開始日より後（61例）、`--STAT='NOT DONE'` に理由が無い、`--TEST` が40文字超など
 - SKIPPED 194 の主因は作っていないドメイン（Trial Design・SV・SE・EX・SUPP）と、渡していない外部辞書
 
-実務で使えるという結論。指摘の量・偽陽性の少なさ・実行時間のいずれも許容範囲で、[「Claude から回す運用」](#claude-から回す運用)の段階2（整形のスクリプト化）へ進める。段階2の実装例は試験リポジトリの `scripts/run-sdtm-validation.ps1`。
+実務で使えるという結論。指摘の量・偽陽性の少なさ・実行時間のいずれも許容範囲で、[「Claude から回す運用」](#claude-から回す運用)の段階2（整形のスクリプト化）へ進める。段階2の実装例は試験リポジトリの `scripts/run-sdtm-validation.py`。
 
 ## P21 Community の確認済み事実
 
@@ -188,22 +188,7 @@ Windows 端末のほうが P21 は導入しやすい。Mac は 4.1.0 止まり�
 
 ## 検証の実行
 
-SDTMIG 3.4 の例。標準とバージョン、パスは対象データに合わせる。
-
-Windows（PowerShell）：
-
-```powershell
-cd $env:USERPROFILE\opt\cdisc-core\core
-.\core.exe validate `
-  -s sdtmig -v 3-4 `
-  -d "$env:USERPROFILE\Box\Stat\Trials\<試験>\<SDTM のフォルダ>" `
-  -dxp "$env:USERPROFILE\Box\Stat\Trials\<試験>\<define.xml のパス>" `
-  -of JSON `
-  -o "$env:USERPROFILE\Box\Stat\Trials\<試験>\log\20260815-validation" `
-  -p disabled
-```
-
-Mac：
+SDTMIG 3.4 の例。標準とバージョン、パスは対象データに合わせる。単発で掛けるときの形で、試験のパイプラインの中では `scripts/run-sdtm-validation.py` が同じ検証を回す。
 
 ```bash
 cd ~/opt/cdisc-core/core
@@ -216,9 +201,11 @@ cd ~/opt/cdisc-core/core
   -p disabled
 ```
 
+Windows では実行ファイルの名前が `core.exe`、Box のルートが `%USERPROFILE%\Box` になる。引数は同じで、`core.exe` の置き場をカレントディレクトリにする点も変わらない（CORE が同梱のスキーマを相対パスで開くため）。
+
 出力は `20260815-validation.json` になる。人が目視する版が要るときは `-of XLSX` で同じコマンドをもう一度回す。
 
-端末固有の絶対パスは文書やプロンプトに書かず、Windows は `$env:USERPROFILE`、Mac は `$HOME` から書く。Box のマウントは永続しないので、実行前に Box のフォルダが存在することを確認する。
+端末固有の絶対パスは文書やプロンプトに書かず、Windows は `%USERPROFILE%`、Mac は `$HOME` から書く。Box のマウントは永続しないので、実行前に Box のフォルダが存在することを確認する。
 
 ### Box Drive が無い端末
 

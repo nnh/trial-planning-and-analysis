@@ -1,7 +1,7 @@
 # Ptosh 由来データの SDTM 整備
 
 作成日：2026-08-15
-改訂日：2026-08-22
+改訂日：2026-09-13
 
 Ptosh（データセンターの EDC）から受領した、SDTM のドメイン名・変数名は使うが派生変数を持たない CSV と define.xml を、CDISC CORE で検証できる状態にするまでの手順。試験A で 2026-08-15 に実施した内容を、他試験でも使える形に整理したもの。
 
@@ -9,22 +9,22 @@ CORE 自体の使い方・導入・実行時の落とし穴は [`sdtm-conformanc
 
 実装は試験リポジトリの次のファイルにある。試験名とパスを差し替えれば他試験でも動く。
 
-- `program/<試験ID>_CSVtoSDTM.sas` — 受領CSV → SDTM データセット
-- `program/<試験ID>_SDTMtoJSON.sas` — SDTM → Dataset-JSON v1.1
-- `scripts/export-sdtm-metadata.sas` — 変数メタデータの書き出し
-- `scripts/update-define-xml.ps1` — 受領 define.xml に derived 変数を反映
-- `scripts/run-sdtm-validation.ps1` — 上記4本と CORE を一続きで実行
+- `program/sas/<試験ID>_CSVtoSDTM.sas`・`program/r/<試験ID>_CSVtoSDTM.R` — 受領CSV → SDTM データセット。二重コーディングの両系統が同じ受領CSVから作る
+- `program/sas/<試験ID>_SDTMtoJSON.sas` — SAS 系の SDTM → Dataset-JSON v1.1。R 系は `CSVtoSDTM.R` が Dataset-JSON まで書き出すので変換の段を持たない
+- `scripts/check-sdtm-declarations.py` — define.xml が載せる宣言（値水準・コードリストの値）と実データの照合
+- `scripts/update-define-xml.py` — 受領 define.xml に derived 変数を反映
+- `scripts/run-sdtm-validation.py` — 上の照合以降と CORE を一続きで実行
 
 ## 全体の流れ
 
 1. 受領データの実値スキャン（何が入っていて何が無いかを機械的に確認する）
-2. SDTM データセットの生成（required・expected の派生変数を埋める）
-3. define.xml の更新（derived 変数と、define に無いドメインを足す）
-4. Dataset-JSON の生成
+2. SDTM データセットと Dataset-JSON の生成（required・expected の派生変数を埋める）
+3. 宣言と実データの照合（define.xml へ載せる値が実データに在るか、実データに宣言外の値が無いか）
+4. define.xml の更新（derived 変数と、define に無いドメインを足す）
 5. CORE による検証
 6. 指摘の切り分け
 
-3〜5は `run-sdtm-validation.ps1` が一続きで回す。1と2は試験ごとに中身を作る。
+3〜5は `scripts/run-sdtm-validation.py` が一続きで回す。1と2は試験ごとに中身を作る。検証に掛けるのは2で出来た Dataset-JSON で、入口が触るのは BOM の除去と読み取りの確認までである。define.xml の生成が実装系統の作ったデータセットを読まなくなったため、3以降は SAS を要しない。
 
 ## 1. 受領データの性質
 
@@ -116,17 +116,25 @@ DM,DOMAIN,2
 ...
 ```
 
-抽出は PowerShell で次のようにする。
+抽出は次のようにする。標準ライブラリだけで足りる。
 
-```powershell
-$j = Get-Content <検証結果>.json -Raw -Encoding UTF8 | ConvertFrom-Json
-$rows = @()
-foreach ($d in ($j.Issue_Details | Where-Object core_id -eq 'CORE-000852')) {
-  $names = [regex]::Matches($d.values[1], "'([^']+)'") | ForEach-Object { $_.Groups[1].Value }
-  $i = 0
-  foreach ($n in $names) { $i++; $rows += [pscustomobject]@{ dataset=$d.dataset; variable=$n; order=$i } }
-}
-$rows | Export-Csv <出力先>\sdtm_variable_order.csv -NoTypeInformation -Encoding UTF8
+```python
+import csv
+import json
+import re
+
+with open('<検証結果>.json', encoding='utf-8') as f:
+    j = json.load(f)
+rows = []
+for d in j['Issue_Details']:
+    if d['core_id'] != 'CORE-000852':
+        continue
+    for i, name in enumerate(re.findall(r"'([^']+)'", d['values'][1]), 1):
+        rows.append((d['dataset'], name, i))
+with open('<出力先>/sdtm_variable_order.csv', 'w', encoding='utf-8', newline='') as f:
+    w = csv.writer(f)
+    w.writerow(('dataset', 'variable', 'order'))
+    w.writerows(rows)
 ```
 
 出力側では、データセットの全変数を「標準順にあるものはその順、無いものは末尾」で並べ替える。SAS では `retain` に並べた変数名を渡す。標準順に存在する変数だけを列挙すると期待どおりに並ばないため、全変数を対象にする。
