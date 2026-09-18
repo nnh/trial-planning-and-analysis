@@ -25,6 +25,13 @@
     D05  受入基準が指す集団の識別子が宣言に無い      error
     D06  図表の宣言が指す群・水準の識別子が宣言に無い warning
     D07  根拠として挙げた節が統計解析計画書に無い    error
+    D08  必須の宣言に行が無い                        error（variable-map.csv は warning）
+
+D08 が要るのは、雛形を置いただけの状態が D01 を通ってしまうためである。ファイルが
+在ることと宣言がそろっていることは別で、全部が空のまま「指摘はありません」を返すと、
+区間1を終えたと読める。2026-09-18 に2試験目で実際にそう出た。variable-map.csv だけを
+warning にするのは、この1本が層を作りながら埋まる宣言で、区間1の出口では空が正しい
+ことがあるため（templates/README.md「使い方」7）。
 
 文書の内容が正しいかは判定しない。識別子の対応と、根拠の節が実在するかだけを見る。
 """
@@ -42,6 +49,9 @@ NEED_METADATA = ("tlf-index.csv", "label-catalog.csv", "analysis-grouping.csv",
                  "analysis-purpose.csv", "variable-map.csv")
 NEED_ACCEPTANCE = ("analysis-set-condition.csv", "primary-endpoint.csv",
                    "display-contract.csv")
+
+# 空でも区間1の出口を妨げない宣言。層を作りながら埋まるものに限る
+SOFT_EMPTY = ("variable-map.csv",)
 
 # 未定を表す書き方。決まっていないことを宣言に残したまま固定すると、実装は
 # その文字列を値として読む
@@ -84,6 +94,10 @@ def audit(meta_dir, acc_dir, sap_path):
                 f.append(Finding("D01", "error", n, "宣言が無い: %s" % p))
                 continue
             tables[n] = read_csv(p)
+            if not tables[n]:
+                sev = "warning" if n in SOFT_EMPTY else "error"
+                f.append(Finding("D08", sev, n,
+                                 "宣言に行が無い（雛形のまま）: %s" % p))
 
     # D02 未定
     for n, rows in tables.items():

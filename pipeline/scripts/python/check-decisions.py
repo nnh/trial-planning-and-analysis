@@ -22,6 +22,12 @@
 #   python scripts/check-decisions.py --quiet   ... 失敗した項目だけを出す
 #   python scripts/check-decisions.py --gate    ... 未決が1件でも残っていれば落とす
 #                                                  （区間3の出口で使う）
+#
+# 終了コード 0 NG 無し / 1 NG あり / 2 検査が走らなかった（台帳そのものが無い）
+#
+# 2 を 0 と読まない。台帳が無いのは規則違反ではなく材料の不在で、区間1の途中では
+# まだ起こしていないのが正しい。2026-09-18 まで FileNotFoundError のトレースバックで
+# 落ちており、呼ぶ側からは検査の異常と区別が付かなかった。
 import argparse
 import csv
 import os
@@ -66,8 +72,14 @@ PRIMARY = re.compile(r'SAP|PRT|研究計画書|プロトコル|プロトコー�
 EXEMPT = {'data-handling-decisions.md'}
 
 
+class NoLedger(Exception):
+    """決定の台帳がまだ無い。規則違反ではなく材料の不在なので終了コード2で返す"""
+
+
 def entries():
     """台帳の各エントリの見出しと区分"""
+    if not os.path.isfile(REG):
+        raise NoLedger(REG)
     t = open(REG, encoding='utf-8').read()
     out, cur = [], None
     for line in t.split('\n'):
@@ -248,4 +260,10 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except NoLedger as exc:
+        print('決定の台帳がありません: %s' % exc)
+        print('区間1で起こす正本です。作り方は '
+              'pipeline/analysis-pipeline-plan.md「決定の正本を1つにする」。')
+        sys.exit(2)
