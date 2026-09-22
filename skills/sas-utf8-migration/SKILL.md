@@ -9,7 +9,7 @@ SAS 9.4 の日本語版は既定の config が shift-jis で、`.sas` も出力�
 
 以下 `$SKILL` は**このSKILL.mdが置かれているディレクトリの絶対パス**。
 
-方針の正本は組織内の SAS 環境ドキュメント「セッションの文字符号化」が持つ。実装の写し元は試験リポジトリの `scripts/sas-common.ps1`。
+方針の正本は組織内の SAS 環境ドキュメント「セッションの文字符号化」が持つ。実装の写し元は枠組みの `pipeline/scripts/python/runcommon.py`（試験リポジトリでは `scripts/runcommon.py`）で、config の切り替えは `resolve_encoding()`、ログの読み方は `read_log()` が持つ。
 
 ## 1. Unicode サーバーの有無を確かめる
 
@@ -64,7 +64,7 @@ sas.exe -config "C:\Program Files\SASHome\SASFoundation\9.4\nls\u8\sasv9.cfg" -s
 
 端末の既定 config は変えない。試験ごとに切り替えられる余地を残すためで、従来の shift-jis で回すときは `nls\ja\sasv9.cfg` を指す。
 
-**ログを読む側の符号化も同時に変える。** CP932 のまま読むと `^ERROR` の検出が効かなくなり、失敗した実行が成功に見える。PowerShell なら `[IO.File]::ReadAllLines($log, (New-Object System.Text.UTF8Encoding($false)))`。
+**ログを読む側の符号化も同時に変える。** CP932 のまま読むと `^ERROR` の検出が効かなくなり、失敗した実行が成功に見える。Python なら `open(log, encoding='utf-8', errors='replace')` で読む。`runcommon.py` の `read_log()` はセッションの符号化に合わせてこれを切り替える。
 
 ## 6. 前後の成果物を突き合わせる
 
