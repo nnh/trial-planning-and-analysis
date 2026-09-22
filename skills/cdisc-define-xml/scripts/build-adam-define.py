@@ -4,8 +4,11 @@ ADaM には受領 define.xml が無いので新規生成になる。入力は3�
 
 - 変数マップ（`--variable-map`）… `label_en`・`origin`・`predecessor`・`spec_ref` を手で維持する
   CSV。**ラベルと Origin の正本**。ADaM の変数はラベルの出どころが3種類（ADaM IG・転記元の
-  SDTM IG・試験固有）に分かれるので、IG からは引けない
-- Dataset-JSON（`--json-dir`）… 変数の型・長さ・ラベル・順序。ADaM を作るプログラムの出力
+  SDTM IG・試験固有）に分かれるので、IG からは引けない。`length`・`order` の列を持つなら
+  **宣言長と変数の並びの正本**にもなり、Dataset-JSON より優先する。列が無い試験、または
+  値が空の変数では Dataset-JSON の値を使う
+- Dataset-JSON（`--json-dir`）… 変数の型・ラベル・行数と、変数マップが決めていない
+  長さ・順序。ADaM を作るプログラムの出力
 - ADaM IG の変数一覧（`--adam-ig`）… `ItemRef/@Mandatory` の判定に使う。
   `export-adam-metadata.py` が CDISC Library の写しから作る
 
@@ -125,7 +128,8 @@ def load_datasets(json_dir, order):
     """Dataset-JSON を読む。ITEMGROUPDATASEQ は CORE のリーダー用の列なので落とす。"""
     out = []
     for p in sorted(glob.glob(os.path.join(json_dir, '*.json'))):
-        d = json.load(open(p, encoding='utf-8'))
+        # SAS の encoding='utf-8' は BOM を書き出す。読み手を選ばせないため utf-8-sig で開く
+        d = json.load(open(p, encoding='utf-8-sig'))
         cols = [c for c in d['columns'] if c['name'] != 'ITEMGROUPDATASEQ']
         out.append((d['name'].upper(), d.get('label', ''), cols, d.get('records')))
     if not out:
@@ -255,12 +259,42 @@ def is_required(cls, variable, req_adsl, req_bds):
     return False
 
 
-def codelist_for(col, exact, patterns):
-    """変数に当てる CodeList の OID。無ければ None。"""
+def attr_int(row, key):
+    """変数マップの数値列。列が無い・空・数値でないときは None。"""
+    if not row:
+        return None
+    v = str(row.get(key) or '').strip()
+    if not v:
+        return None
+    try:
+        return int(v)
+    except ValueError:
+        return None
+
+
+def order_cols(name, cols, vm):
+    """変数の並び。変数マップが全変数へ order を与えていればその順、無ければ JSON の順。
+
+    一部にだけ order がある状態で並べ替えると、与えていない変数の位置が黙って決まる。
+    全部そろっていて重複も無いときだけ変数マップを使う。
+    """
+    ords = [attr_int(vm.get((name, c['name'])), 'order') for c in cols]
+    if any(o is None for o in ords) or len(set(ords)) != len(ords):
+        return cols, False
+    return [c for _, c in sorted(zip(ords, cols), key=lambda t: t[0])], True
+
+
+def codelist_for(col, exact, patterns, length=None):
+    """変数に当てる CodeList の OID。無ければ None。
+
+    長さ1の文字変数かどうかは宣言長で見る（渡されなければ Dataset-JSON の値）。
+    """
     name = col['name']
     if name in exact:
         return exact[name]
-    if col.get('dataType') == 'string' and col.get('length') == 1:
+    if length is None:
+        length = col.get('length')
+    if col.get('dataType') == 'string' and length == 1:
         for pat, oid in patterns:
             if fnmatch.fnmatchcase(name, pat):
                 return oid
@@ -303,6 +337,19 @@ def build(a):
     mdv.set(Q(DEF, 'StandardName'), a.standard_name)
     mdv.set(Q(DEF, 'StandardVersion'), a.standard_version)
 
+    # 変数の並びの正本が変数マップにあるならそちらへ揃える。ItemRef の OrderNumber と
+    # ItemDef の並びが同じ順になるよう、ここで一度だけ並べ替えて以後はこれを使う
+    ordered, from_map = [], []
+    for name, label, cols, rec in datasets:
+        cs, ok = order_cols(name, cols, vm)
+        ordered.append((name, label, cs, rec))
+        if ok:
+            from_map.append(name)
+    datasets = ordered
+    if from_map:
+        print(f'変数の並びを変数マップから採った {len(from_map)} データセット: '
+              + ', '.join(from_map))
+
     # ItemGroupDef（データセット）
     for name, label, cols, _ in datasets:
         cls, struct, rep = ds_meta.get(name, DS_DEFAULT)
@@ -341,12 +388,7 @@ def build(a):
             # 「変数の属性の正本を宣言に置く」）。実データの最大長から採ると、宣言は
             # 毎回の実データの写しになり、実装を回せない端末で同じ define.xml を作れない。
             # 宣言が無い変数だけ実データの値へ落ちる。
-            declared = None
-            if r and str(r.get('length') or '').strip():
-                try:
-                    declared = int(str(r['length']).strip())
-                except ValueError:
-                    declared = None
+            declared = attr_int(r, 'length')
             actual = c.get('length')
             use = declared or actual
             if use:
@@ -358,7 +400,7 @@ def build(a):
             it.set('SASFieldName', c['name'])
             desc(it, (r.get('label_en') if r and r.get('label_en')
                       else c.get('label') or c['name']))
-            cl = codelist_for(c, cl_exact, cl_pat)
+            cl = codelist_for(c, cl_exact, cl_pat, use)
             if cl:
                 if cl not in cls_def:
                     raise SystemExit(f'{c["name"]} が参照する CodeList {cl} の定義がありません')
