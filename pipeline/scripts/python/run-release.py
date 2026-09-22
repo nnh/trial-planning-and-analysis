@@ -10,7 +10,7 @@
 # 段階は次のとおり。前の段階が落ちたら後ろは回さない。区間2（固定から突合まで）の
 # 工程をすべて置く。以前は固定データの検証・SDTM の適合性検証・納品パッケージが
 # この計画の外にあり、「全段階が通りました」が区間の完了を意味していなかった。
-#   1. 固定データの検証（受領物の走査・宣言との照合。何も書き出さない）
+#   1. 宣言と固定データの検証（宣言の検査・受領物の走査・宣言との照合。何も書き出さない）
 #   2. SAS 系の生成（run-all-sas.py。中で QC のゲートが働く）
 #   3. R 系の生成（SDTM → ADaM → ARD → 図表）
 #   4. SDTM の define の更新と CDISC CORE による適合性検証
@@ -379,11 +379,27 @@ def main():
         return r(os.path.join(REPO, 'program', 'r', '%s_%s.R' % (trial, name)), *a)
 
     def verify_fixed_data():
-        """固定データの検証。受領物を走査し、宣言と突き合わせる。何も書き出さない。
+        """宣言と固定データの検証。宣言の検査を回し、受領物を走査して宣言と突き合わせる。
+        何も書き出さない。
 
         生成の前に置く。受領データ由来の不整合をデータセンターへ照会する時間を確保する
         ためで、解析の終盤で見つけると間に合わない（analysis-pipeline-plan.md）。
+
+        宣言の検査を先に回す。どれもリポジトリの中の宣言とソースだけを読み、実データも
+        外部の道具も要らないので、どの端末でも数秒で同じ結果が出る。生成の後ろに置くと、
+        長い生成を回し切ってから宣言の誤りで落ちる。通し実行の外に置くと落ちたまま
+        気づかれない。終了試験では check-decisions.py が外にあり、NG 4件が残ったまま
+        区間2が「全段階が通りました」と述べた。check-decisions.py は --gate を付けない。
+        未決が残るのは区間2では正しく、未決を0件にするのは区間3の出口の条件である。
+        独立レビューの台帳の検査（check-review-ledger.py）は入れない。区間の工程では
+        なく、台帳を起こさない試験もある。
         """
+        for script in ('check-decisions.py', 'check-datatype-rule.py',
+                       'check-identifier-length.py'):
+            print('  --- %s' % script)
+            code = py(script)
+            if code:
+                return code
         m = methods_dir()
         if m is None:
             print('  枠組みの review/ が見つかりません。--methods-dir か'
@@ -510,7 +526,7 @@ def main():
             return code
         return py('check-pi-package.py')
 
-    plan = [(1, '固定データの検証', verify_fixed_data),
+    plan = [(1, '宣言と固定データの検証', verify_fixed_data),
             (2, 'SAS 系の生成', gen_sas),
             (3, 'R 系の生成', gen_r),
             (4, 'SDTM の define と適合性検証', sdtm_define),
