@@ -15,12 +15,15 @@ Shift_JIS を厳密に実装した処理系での読み込みで問題になる�
 ## 1. まず検査する
 
 ```bash
-python "$SKILL/scripts/check-nonascii.py" --root "<データルート>"
+python "$SKILL/scripts/check-nonascii.py" --root "<データルート>" [--system r|sas]
 ```
 
-`--root` は `input/sdtm/json` と `input/ads/json` のうち存在するものを探す。二重コーディング
-の試験でも、共有先が受け取るのは正本の側だけなので、検証用の並行実装（`sdtm_r` 等）は
-既定に入れない。この構成でないとき、両方を見たいときは `--dir ラベル=パス` を並べる。
+`--root` は `datasets/<系統>/sdtm/json` と `datasets/<系統>/adam/json` のうち存在するものを
+探す（置き場の正本は `pipeline/analysis-pipeline-plan.md`「フォルダ構成と命名規則」）。二重
+コーディングの試験でも、共有先が受け取るのは正本の系統だけなので、系統は1つに絞る。
+`datasets/` に系統が1つだけなら `--system` は省略でき、2つあるときはどちらが正本かを
+推測せず `--system` を求めて止まる。この構成でないとき、両方を見たいときは
+`--dir ラベル=パス` を並べる。
 Dataset-JSON・CSV・sas7bdat を読む。**共有先が受け取るファイルで判定したいので、
 Dataset-JSON があるならそれを対象にする**（sas7bdat では、書き出しの段階で起きる
 変換の問題を見落とす）。

@@ -8,11 +8,11 @@ SDTM・ADaM を ASCII 印字可能文字（U+0020〜U+007E）だけで構成で�
 Dataset-JSON（v1.0/v1.1）・CSV・sas7bdat を読む。共有先が受け取るファイルで判定
 したいので、通常は Dataset-JSON を対象にする。
 
-    # 標準的なフォルダ構成を仮定する（input/sdtm/json と input/ads/json）
-    python check-nonascii.py --root "<データルート>"
+    # 標準的なフォルダ構成を仮定する（datasets/<系統>/sdtm/json と datasets/<系統>/adam/json）
+    python check-nonascii.py --root "<データルート>" [--system r|sas]
 
     # 対象を明示する（ディレクトリでもファイルでもよい。ラベル=パス）
-    python check-nonascii.py --dir SDTM=<path>/sdtm/json --dir ADaM=<path>/ads/json
+    python check-nonascii.py --dir SDTM=<path>/sdtm/json --dir ADaM=<path>/adam/json
     python check-nonascii.py --file CO=<path>/sdtm/co.sas7bdat
 
     # 許容する変数（データセット.変数）を挙げる。理由は呼び出し側の文書に書く
@@ -33,13 +33,21 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 ASCII_OK = set(range(0x20, 0x7f))
 
-# --root で探す標準構成。存在するものだけを対象にする。二重コーディングの試験でも
-# 共有先が受け取るのは正本の側だけなので、検証用の並行実装（sdtm_r 等）は既定に
-# 入れない。両方を見たいときは --dir で明示する。
-DEFAULT_DIRS = [
-    ('SDTM', os.path.join('input', 'sdtm', 'json')),
-    ('ADaM', os.path.join('input', 'ads', 'json')),
+# --root で探す標準構成（pipeline/analysis-pipeline-plan.md「フォルダ構成と命名規則」の
+# datasets/<系統>/<層>/json）。存在するものだけを対象にする。二重コーディングの試験でも
+# 共有先が受け取るのは正本の系統だけなので、系統は1つに絞る。どちらが正本かは試験が
+# 決めることなので、両系統があるときは推測せず --system を求める。両方を見たいときは
+# --dir で明示する。
+SYSTEMS = ('r', 'sas')
+DEFAULT_LAYERS = [
+    ('SDTM', 'sdtm'),
+    ('ADaM', 'adam'),
 ]
+
+
+def default_dirs(root, system):
+    return [(label, os.path.join(root, 'datasets', system, layer, 'json'))
+            for label, layer in DEFAULT_LAYERS]
 
 
 def has_nonascii(v):
@@ -127,6 +135,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--root', help='データルート。標準構成のフォルダを探す')
+    ap.add_argument('--system', choices=SYSTEMS,
+                    help='--root で見る実装系統。datasets/ に系統が1つだけなら省略できる')
     ap.add_argument('--dir', action='append', default=[], metavar='ラベル=パス',
                     help='検査するディレクトリ。複数指定できる')
     ap.add_argument('--file', action='append', default=[], metavar='ラベル=パス',
@@ -139,13 +149,26 @@ def main():
 
     targets = []
     if a.root:
-        for label, sub in DEFAULT_DIRS:
-            p = os.path.join(a.root, sub)
-            if os.path.isdir(p):
-                targets.append((label, p))
-        if not targets:
-            print(f'標準構成のフォルダが {a.root} に見つかりません。--dir で指定してください。')
+        found = {s: [(lb, p) for lb, p in default_dirs(a.root, s) if os.path.isdir(p)]
+                 for s in SYSTEMS}
+        present = [s for s in SYSTEMS if found[s]]
+        if a.system:
+            system = a.system
+        elif len(present) == 1:
+            system = present[0]
+        elif not present:
+            print('標準構成のフォルダ（datasets/<系統>/sdtm/json・adam/json）が '
+                  f'{a.root} に見つかりません。--dir で指定してください。')
             return 2
+        else:
+            print('datasets/ に系統が2つあります（' + '・'.join(present) + '）。'
+                  '共有先が受け取る正本の系統を --system で指定してください。')
+            return 2
+        if not found[system]:
+            print(f'datasets/{system}/sdtm/json・adam/json が {a.root} に見つかりません。')
+            return 2
+        targets.extend(found[system])
+        print(f'系統: {system}')
     for spec in a.dir + a.file:
         if '=' not in spec:
             print(f'--dir / --file は ラベル=パス の形で指定してください: {spec}')
