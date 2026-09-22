@@ -29,7 +29,9 @@
 # --update は固定データが差し替わったときに宣言を作り直すための道で、既定ではない。
 # 何が変わるかを git の差分で見てから入れること。
 #
-# 終了コード 0 全件一致 / 1 食い違いがある
+# 終了コード 0 全件一致 / 1 食い違いがある / 2 検査が走らなかった（Dataset-JSON か宣言の CSV が無い）
+#
+# 2 を 0 と読まない。
 import argparse
 import csv
 import glob
@@ -53,6 +55,9 @@ SEQ_COL = 'ITEMGROUPDATASEQ'
 
 
 def read_csv(path):
+    if not os.path.isfile(path):
+        print('材料が無い: 宣言の CSV がありません: %s' % path)
+        sys.exit(2)
     with open(path, encoding='utf-8-sig', newline='') as f:
         return list(csv.DictReader(f))
 
@@ -68,7 +73,8 @@ def load_json_dir(json_dir):
     """Dataset-JSON をドメイン名で引ける形にする。"""
     paths = sorted(glob.glob(os.path.join(json_dir, '*.json')))
     if not paths:
-        raise SystemExit('Dataset-JSON がありません: %s' % json_dir)
+        print('材料が無い: Dataset-JSON がありません: %s' % json_dir)
+        sys.exit(2)
     out = {}
     for p in paths:
         if os.path.basename(p).lower() == 'define.json':

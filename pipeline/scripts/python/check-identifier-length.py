@@ -26,7 +26,7 @@
 # ここで確かめられるのは語幹の長さである。組み立てた後の値は build-ars-json.py が
 # 宣言と突き合わせる段で捕まる。
 #
-# 材料が無いときは何が無いかを述べて非0で終える。読む材料はすべてリポジトリの中に
+# 材料が無いときは何が無いかを述べて 2 で終える。読む材料はすべてリポジトリの中に
 # あり外部の道具に依存しないので、飛ばす口（--allow-skip）は付けない。ファイルが
 # 無い・length 宣言が1つも読めない・宣言から識別子が1つも取れないのは、環境の不足
 # ではなく検査か正本の側の異常である。
@@ -34,7 +34,10 @@
 #   python scripts/check-identifier-length.py
 #   python scripts/check-identifier-length.py --sas <path>   ... 検査自身を試すための口
 #
-# 終了コード 0 ERROR 無し / 1 ERROR あり
+# 終了コード 0 ERROR 無し / 1 ERROR あり / 2 検査が走らなかった（上の材料が無い）
+#
+# 2 を 0 と読まない。材料が1つでも欠けていれば、見つかった ERROR があっても 2 を返す。
+# 一部の列しか見ていない結果を、全体を見た結果として読ませないためである。
 import sys, os, re, csv, argparse, collections
 
 sys.stdout.reconfigure(encoding='utf-8')
@@ -89,10 +92,10 @@ RE_AS_LENGTH = re.compile(r"\bas\s+([A-Za-z_][A-Za-z_0-9]*)\s+length\s*=\s*(\d+)
                           re.IGNORECASE)
 
 
-def read_widths(path, err):
+def read_widths(path, lack):
     """ard_ops.sas から列ごとの宣言幅を読む。同じ列に複数の宣言があるので集合で返す。"""
     if not os.path.exists(path):
-        err.append('SAS のソースが見つからない: %s。格納長の正本なので、'
+        lack.append('SAS のソースが見つからない: %s。格納長の正本なので、'
                    '無いままでは何も確かめられない' % path)
         return {}
     with open(path, encoding='utf-8') as f:
@@ -107,24 +110,24 @@ def read_widths(path, err):
         widths[name.upper()].add(int(w))
         n += 1
     if not n:
-        err.append('%s から length 宣言を1つも読めなかった。'
+        lack.append('%s から length 宣言を1つも読めなかった。'
                    '書き方が変わったか、読み取りの正規表現が古い' % path)
     return widths
 
 
-def read_ids(rel, col, split, keep, err):
+def read_ids(rel, col, split, keep, lack):
     """宣言の CSV から識別子を読む。空欄は宣言が無いという意味なので落とす。"""
     path = os.path.join(REPO, rel)
     if not os.path.exists(path):
-        err.append('宣言の CSV が見つからない: %s' % rel)
+        lack.append('宣言の CSV が見つからない: %s' % rel)
         return []
     with open(path, encoding='utf-8-sig', newline='') as f:
         rows = list(csv.DictReader(f))
     if not rows:
-        err.append('%s に行が無い' % rel)
+        lack.append('%s に行が無い' % rel)
         return []
     if col not in rows[0].keys():
-        err.append('%s に %s 列が無い。列の名前が変わったか、検査の側が古い' % (rel, col))
+        lack.append('%s に %s 列が無い。列の名前が変わったか、検査の側が古い' % (rel, col))
         return []
     out = []
     for r in rows:
@@ -153,9 +156,15 @@ def main():
                     help='格納長を読む SAS のソース（既定は program/sas/macro/ard_ops.sas）')
     args = ap.parse_args()
 
-    err, warn = [], []
-    widths = read_widths(args.sas, err)
+    err, warn, lack = [], [], []
+    widths = read_widths(args.sas, lack)
     sasname = os.path.basename(args.sas)
+    if not widths:
+        # 格納長の正本が読めなければ、どの列も比べられない。列ごとの ERROR を並べると
+        # 規則違反が見つかったように読めるので、ここで止める
+        for m in lack:
+            print('材料が無い: ' + m)
+        return 2
 
     print('格納長の正本: %s' % args.sas)
     for col in sorted(SOURCES):
@@ -173,9 +182,9 @@ def main():
 
         ids = []
         for rel, col_name, split, keep in SOURCES[col]:
-            ids.extend(read_ids(rel, col_name, split, keep, err))
+            ids.extend(read_ids(rel, col_name, split, keep, lack))
         if not ids:
-            err.append('%s の識別子を宣言から1つも読めなかった。'
+            lack.append('%s の識別子を宣言から1つも読めなかった。'
                        '0件で通ると検査が効いていないことに気づけない' % col)
             continue
 
@@ -198,7 +207,12 @@ def main():
         print('WARN: ' + w)
     for e in err:
         print('ERROR: ' + e)
-    print('ERROR %d / WARN %d' % (len(err), len(warn)))
+    for m in lack:
+        print('材料が無い: ' + m)
+    print('ERROR %d / WARN %d / 材料の不足 %d' % (len(err), len(warn), len(lack)))
+    if lack:
+        print('検査が走り切っていない。ERROR の件数を全体の結果として読まない。')
+        return 2
     return 1 if err else 0
 
 

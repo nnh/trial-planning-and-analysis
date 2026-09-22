@@ -24,14 +24,20 @@
 # 対応した項の一部が `- 対応：` を持つ。どれか1つでもあれば記録があるものとして扱う。
 # 「結果が無ければ未対応」と決め打つと、第3回の C3-103・C3-104・C3-115 が誤って挙がる。
 #
-# 材料が無いときは何が無いかを述べて非0で終える。台帳はリポジトリの中にあり外部の道具に
+# 材料が無いときは何が無いかを述べて 2 で終える。台帳はリポジトリの中にあり外部の道具に
 # 依存しないので、飛ばす口（--allow-skip）は付けない。ファイルが無い・1件も項目を読めない
 # のは環境の不足ではなく、台帳か検査の側の異常である。
 #
 #   python scripts/check-review-ledger.py                ... 台帳の置き場にある *-ledger.md すべて
 #   python scripts/check-review-ledger.py <path.md> ...  ... 任意の台帳
 #
-# 終了コード 0 ERROR 無し / 1 ERROR あり
+# 終了コード 0 ERROR 無し / 1 ERROR あり / 2 検査が走らなかった（台帳が無い・見つからない）
+#
+# 2 を 0 と読まない。2026-09-23 まで材料の不在を 1 で返しており、規則違反と区別が
+# 付かなかった。
+#
+# 通し実行（run-release.py）には入れない。独立レビューは区間の工程ではなく、台帳を
+# 起こさない試験もある。入れると台帳の無い試験では区間2が通らなくなる。
 import sys, os, re, glob, collections
 
 sys.stdout.reconfigure(encoding='utf-8')
@@ -174,14 +180,14 @@ def main(argv):
         print('材料が無い: 台帳が1件も無い（' + LEDGER_DIR + ' の *-ledger.md）')
         print('台帳を1件も読んでいない。'
               '検査の対象が消えたのか、道を間違えたのかを先に確かめる。')
-        return 1
+        return 2
     lack = [p for p in paths if not os.path.exists(p)]
     if lack:
         for p in lack:
             print('材料が無い: 台帳が見つからない（' + p + '）')
         print('台帳を1件も読んでいない。'
               '検査の対象が消えたのか、道を間違えたのかを先に確かめる。')
-        return 1
+        return 2
 
     err, warn = [], []
     for p in paths:

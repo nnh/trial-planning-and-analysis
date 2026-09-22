@@ -7,6 +7,14 @@
 # 0 になり分子遺伝学的効果の判定が1件動いた。
 #
 # 判定は、各実装から接尾辞のトークン集合と完全一致の名前集合を取り出して比べる。
+#
+#   python scripts/check-datatype-rule.py
+#
+# 終了コード 0 3実装で揃っている / 1 揃っていない / 2 検査が走らなかった
+#   （実装のファイルが無い、または規則を取り出せない）
+#
+# 2 を 0 と読まない。取り出せないのは実装の書き方が変わったときで、規則が揃っているか
+# どうかは分からない。
 import os
 import re
 import sys
@@ -55,20 +63,22 @@ def extract(path, re_suffix, re_exact):
 def main():
     got = {}
     ng = 0
+    lack = 0
     for label, (path, rs, re_) in SRC.items():
         if not os.path.exists(path):
-            print('NG %s が無い: %s' % (label, path))
-            ng += 1
+            print('材料が無い: %s が無い: %s' % (label, path))
+            lack += 1
             continue
         suffix, exact = extract(path, rs, re_)
         if suffix is None:
-            print('NG %s から接尾辞の集合を取り出せない（実装の書き方が変わった）' % label)
-            ng += 1
+            print('材料が無い: %s から接尾辞の集合を取り出せない（実装の書き方が変わった）' % label)
+            lack += 1
             continue
         got[label] = (suffix, exact)
 
-    if ng:
-        return 1
+    if lack:
+        print('検査が走らなかった。規則が揃っているかは分からない。')
+        return 2
 
     labels = list(got)
     base = got[labels[0]]
