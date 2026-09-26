@@ -21,8 +21,9 @@ comment      : 読み込むドメインを増減するときは &raw_dom / &ext_
 %macro require_base;
   %if not %symexist(base) %then %do;
     %put ERROR: autoexec.sas が実行されていません。;
-    %put ERROR- リポジトリルートをカレントにして SAS を起動するか、;
-    %put ERROR- sas.exe -autoexec "<repo>\autoexec.sas" を指定してください。;
+    %put ERROR- python scripts\run-all-sas.py から起動してください。;
+    %put ERROR- 手で起動するときも -config と -autoexec を必ず明示します（端末の既定の config に任せない）。;
+    %put ERROR- sas.exe -config "<SASHome>\SASFoundation\9.4\nls\u8\sasv9.cfg" -autoexec "<repo>\autoexec.sas" -sysin ...;
     %abort cancel;
   %end;
   %if %length(&base) = 0 %then %do;

@@ -27,6 +27,8 @@
 - `python/run-sdtm-validation.py` — SDTM の宣言の照合、define.xml の更新、CDISC CORE による適合性検証
 - `python/runcommon.py` — 上が共通で使う起動の作法。SAS のバッチ起動と成否の判定、試験フォルダの解決、Rscript の在処、画面の符号化
 
+SAS は `runcommon.invoke_sas` からだけ起動する。`invoke_sas` は毎回 `-config` でセッションの config（既定は UTF-8 の `nls\u8\sasv9.cfg`）を明示し、端末の既定の `sasv9.cfg` には頼らない。日本語版の端末の既定は shift-jis で、UTF-8 へ切り替えた端末と切り替えていない端末が混在するため、既定に任せると同じプログラムが端末によって別の符号化で動く。`sas.exe` を直接呼ぶ入口を新しく作らない。作るなら `invoke_sas` を通す。
+
 ### 生成
 
 - `python/boxpath.py` — 試験の設定の読み出しと Box のパス解決。試験IDと試験フォルダを引く口をここだけが持つ
