@@ -12,15 +12,17 @@ docx は `pandoc -t markdown` に、Google Docs は markdown の書き出しに�
 
 `review/` の置き場は次の順で探す。
 
-    1. 環境変数 TRIAL_REVIEW_DIR
-    2. ~/Projects/nnh/trial-planning-and-analysis/review
-    3. ~/trial-planning-and-analysis/review
+    1. 引数 --methods-dir
+    2. 環境変数 TRIAL_REVIEW_DIR
+    3. このスクリプトの実体が属するリポジトリの review/（symlink は解決する）
+    4. ~/Projects/nnh・~/Projects/stat・~/Projects・~ の下の trial-planning-and-analysis/review
 """
 
 import argparse
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 for _s in (sys.stdout, sys.stderr):
     try:
@@ -42,6 +44,10 @@ def methods_dir(explicit=None):
     env = os.environ.get("TRIAL_REVIEW_DIR")
     if env:
         cands.append(env)
+    # スキルは ~/.claude/skills/ から枠組みの clone へ symlink で張られている。実体の
+    # 場所から辿れば clone の置き場（nnh/・stat/ など端末ごとに違う）を決め打ちせずに済む。
+    # skills/<名前>/scripts/<本ファイル> なので、3つ上がリポジトリのルート。
+    cands.append(str(Path(__file__).resolve().parents[3] / "review"))
     home = os.path.expanduser("~")
     for parent in (os.path.join(home, "Projects", "nnh"),
                    os.path.join(home, "Projects", "stat"),
