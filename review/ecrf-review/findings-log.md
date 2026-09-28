@@ -5,7 +5,7 @@
 
 これまでの試験で見つかった欠陥を型として残す。次の試験で同じ箇所を見るための蓄積であり、レビューのたびに追記する。各項目は、何が起きたか・どう見つけるか・出どころの順に書く。
 
-出どころの試験名は匿名化し、試験A・試験F・試験G と表記する（同じラベルは同じ試験を指す。[../planning-review/findings-log.md](../planning-review/findings-log.md) の試験A・B・C・D とは別の割り当てである）。
+出どころの試験名は匿名化し、試験A・試験F・試験G と表記する（同じラベルは同じ試験を指す。[../planning-review/findings-log.md](../planning-review/findings-log.md) と共通の割り当てで、どちらの試験A も同じ試験である）。
 
 ## 構造の欠陥
 

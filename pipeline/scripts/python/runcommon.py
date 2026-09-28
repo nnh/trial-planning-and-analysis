@@ -52,7 +52,7 @@ def setup_console():
     """画面へ出す文字を UTF-8 にし、1行ごとに吐き出す。
 
     符号化。ssh 越しに呼ばれると既定では相手のコンソールのコードページ（日本語 Windows は
-    cp932）で出るため、日本語のエラーが読めなくなる。RINKEN37 経由で回すときに実際に
+    cp932）で出るため、日本語のエラーが読めなくなる。ssh 越しの Windows の実行機で回すときに実際に
     化けた（2026-08-22）。実コンソールへ書くときは Python が WriteConsoleW を使うので
     この指定は効かず、パイプ・ファイルへ流したときだけ効く。
 
@@ -225,8 +225,8 @@ def invoke_sas(program, tag, log_dir=None, init_stmt=None, encoding=None,
     #   ERROR: Windows error code: 1006 in hx_disk_is_dir for ...\input\rawdata
     #   ERROR: ライブラリRAWはアクセスメソッドRANDOMには無効です。
     # libname が張れないので後続が全滅するが、一過性なので1回やり直せば通る。
-    # 2026-08-22 に RINKEN37 で実測：1回目 ERROR 4・37.5秒、2回目 ERROR 0・1.3秒。
-    # 311C4W991 でも初回だけ同じ 1006 が出る（akiko-office の docs/sas-environment.md）。
+    # 2026-08-22 に Windows の実行機で実測：1回目 ERROR 4・37.5秒、2回目 ERROR 0・1.3秒。
+    # 別の Windows 端末でも初回だけ同じ 1006 が出る。
     if any('windows error code: 1006' in ln.lower() for ln in lines):
         print('  （%s: Box Drive の初回取得エラー 1006 を検出。1回だけやり直します）' % tag)
         subprocess.run(argv, check=False)
