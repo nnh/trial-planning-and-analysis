@@ -62,7 +62,7 @@ CP932 として読めて UTF-8 へ変換でき、**戻したときに元のバ�
 sas.exe -config "C:\Program Files\SASHome\SASFoundation\9.4\nls\u8\sasv9.cfg" -sysin <program> ...
 ```
 
-端末の既定 config は変えない。試験ごとに切り替えられる余地を残すためで、従来の shift-jis で回すときは `nls\ja\sasv9.cfg` を指す。
+端末の既定 config も `nls\u8` へ切り替える。`-config` を渡し忘れた経路が、黙って shift-jis のまま動くのを防ぐためで、渡し忘れは実際に起きた（2026-08-23 に、既定は変えないとしていた前日の判断を改めた）。既定を決めているのは `SASHome\SASFoundation\9.4\sasv9.cfg` の `-config` の1行で、`nls\ja` を `nls\u8` に替える。写しを取ってから書き換え、`Program Files` は管理者の権限でしか書けない。従来の shift-jis で回す試験は `-config` で `nls\ja\sasv9.cfg` を明示する。
 
 **ログを読む側の符号化も同時に変える。** CP932 のまま読むと `^ERROR` の検出が効かなくなり、失敗した実行が成功に見える。Python なら `open(log, encoding='utf-8', errors='replace')` で読む。`runcommon.py` の `read_log()` はセッションの符号化に合わせてこれを切り替える。
 
