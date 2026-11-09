@@ -111,7 +111,7 @@ def main() -> int:
     if a.prt:
         codes.append(run("研究計画書の構造（S01-S10）", sap_audit, [a.prt, "--severity", a.severity]))
     if a.ecrf:
-        codes.append(run("電子症例報告書の構造定義（R01-R12）", ecrf_audit, [a.ecrf, "--severity", a.severity]))
+        codes.append(run("電子症例報告書の構造定義（R01-R13）", ecrf_audit, [a.ecrf, "--severity", a.severity]))
     if a.metadata:
         args = ["--metadata", a.metadata, "--acceptance", a.acceptance,
                 "--severity", a.severity]

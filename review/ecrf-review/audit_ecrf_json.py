@@ -31,6 +31,11 @@ MAX_TESTCD_LEN = 8
 MAX_TEST_LEN = 40
 MAX_LABEL_LEN = 40
 
+# --TEST の上限の、ドメインごとの例外。IE の IETEST は選択・除外基準の全文を入れる
+# 変数で、SDTMIG（3.2〜3.4）の IE の変数定義が "IETEST cannot be longer than 200
+# characters" と定める。40文字を当てると基準の大半が error になる。
+MAX_TEST_LEN_BY_DOMAIN = {"IE": 200}
+
 
 class Finding:
     def __init__(self, rule_id, rule, severity, sheet, field, label, detail):
@@ -142,6 +147,77 @@ def rule_reference_cross_sheet(spec, sheets, options):
                     % (ref, sh["alias"]))
 
 
+def rule_reference_same_sheet(spec, sheets, options):
+    """R13 同じシート内の参照フィールドが、繰り返しの欄の別の回を指している。
+
+    ある試験で、ベースラインの標的病変2〜5の計測レコードが持つ検査方法・検査日の
+    参照フィールドが、標的病変1の欄を指したままだった。欄を複製した際の置換漏れで、
+    R02 と同じ型だが参照先が同じシート内にあるため R02 では拾えない。
+
+    構造定義は欄の区切りを持たない（見出しは表示用で、シートに1つの評価日を全欄が
+    参照する正しい設計もある）。そこで繰り返しの構造から判定する。同じシートで
+    ラベル・SDTM 変数・型が同じ項目が複数あれば、欄の繰り返しと見る。それらを指す
+    同じ役割の参照フィールドのうち2件以上が同じ項目を指し、どこからも参照されない
+    繰り返しが残っていれば置換漏れの疑いとする。参照フィールドと繰り返しの件数が
+    等しければ、並び順で対応を取って本来の参照先を添える。
+    """
+    def order(f):
+        return f.get("seq") or 0
+
+    for sh in sheets:
+        items = sh["raw"].get("field_items", [])
+        var_of = {fname: tuple(sorted((p, v) for p, v, _ in maps))
+                  for fname, maps in sh["mapping"].items()}
+
+        def key(f):
+            return ((f.get("label") or "").strip(), var_of.get(f["name"], ()),
+                    f.get("type"))
+
+        repeats = collections.defaultdict(list)
+        for f in items:
+            if f.get("type") != "FieldItem::Reference":
+                repeats[key(f)].append(f)
+
+        # 同じ繰り返しを指す、同じ役割（ラベル・SDTM 変数が同じ）の参照フィールドの組
+        groups = collections.defaultdict(list)
+        for f in items:
+            ref = f.get("reference_field") or ""
+            if "." not in ref:
+                continue
+            target_sheet, target_name = ref.split(".", 1)
+            target = sh["fields"].get(target_name)
+            if target_sheet != sh["alias"] or not target:
+                continue
+            k = key(target)
+            if not (k[0] or k[1]):
+                continue          # ラベルも変数も無い項目は、繰り返しを判定できない
+            groups[(k, key(f))].append((f, target_name))
+
+        for (k, _role), refs in groups.items():
+            reps = sorted(repeats[k], key=order)
+            hits = collections.Counter(t for _f, t in refs)
+            unused = [r["name"] for r in reps if not hits[r["name"]]]
+            if max(hits.values()) < 2 or not unused:
+                continue
+            refs = sorted(refs, key=lambda x: order(x[0]))
+            if len(refs) == len(reps):
+                pairs = [(f, t, reps[i]["name"]) for i, (f, t) in enumerate(refs)
+                         if t != reps[i]["name"]]
+            else:
+                pairs = [(f, t, None) for f, t in refs if hits[t] > 1]
+            for f, t, expected in pairs:
+                shared = ("（%d 件の参照フィールドが共有）" % hits[t]
+                          if hits[t] > 1 else "")
+                hint = ("並び順からは '%s.%s' を指すはず" % (sh["alias"], expected)
+                        if expected else
+                        "どこからも参照されていない同じ項目: %s" % ", ".join(unused))
+                yield Finding(
+                    "R13", "参照フィールドが同じシート内の別の欄を参照", "error",
+                    sh["alias"], f["name"], f.get("label", ""),
+                    "参照先 '%s.%s'%s。%s。欄の複製時の置換漏れの疑い"
+                    % (sh["alias"], t, shared, hint))
+
+
 def mapped_fields(sheets, suffix):
     """--TESTCD / --TEST にマップされたフィールドを、その固定値とともに返す。
 
@@ -183,14 +259,20 @@ def rule_testcd_length(spec, sheets, options):
 
 
 def rule_test_length(spec, sheets, options):
-    """R04 --TEST の値が40文字を超える。"""
+    """R04 --TEST の値が上限を超える。上限は40文字、IE の IETEST だけ200文字。
+
+    ある試験で IETEST にも40文字を当て、選択・除外基準34件が誤って error になった。
+    IETEST を検査から外さず上限を変えたのは、200文字を超える基準文は拾うため。
+    """
     for sh, fname, field, prefix, var, _rec, value in mapped_fields(sheets,
                                                                     "TEST"):
-        if len(value) > MAX_TEST_LEN:
+        limit = MAX_TEST_LEN_BY_DOMAIN.get(prefix, MAX_TEST_LEN)
+        if len(value) > limit:
             yield Finding(
-                "R04", "TEST が40文字超", "error",
+                "R04", "TEST が上限超", "error",
                 sh["alias"], fname, field.get("label", ""),
-                "%s.%s の値 '%s' は %d 文字" % (prefix, var, value, len(value)))
+                "%s.%s の値 '%s' は %d 文字（上限 %d）"
+                % (prefix, var, value, len(value), limit))
 
 
 def rule_label_length(spec, sheets, options):
@@ -400,6 +482,7 @@ RULES = [
     rule_numeric_validator,
     rule_unmapped_input,
     rule_unusable_option_values,
+    rule_reference_same_sheet,
 ]
 
 

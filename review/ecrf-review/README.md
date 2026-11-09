@@ -1,13 +1,14 @@
 # eCRF 設計レビュー
 
 作成日：2026-08-12
-改訂日：2026-08-22
+改訂日：2026-11-09
 
 EDC 固定前に、eCRF が PRT・SAP のとおり構築され、解析に必要なデータが取れる形になっているかを確認するための一式。試験に依存しない汎用資産として、ここを正本にする。
 
 - [checklist.md](checklist.md) — レビュー本体の手順とチェック項目
 - [findings-log.md](findings-log.md) — 過去に見つかった欠陥の型。次の試験で同じ箇所を見るための蓄積
 - [audit_ecrf_json.py](audit_ecrf_json.py) — eCRF 構造定義 JSON の機械検査
+- [audit_ecrf_json_test.py](audit_ecrf_json_test.py) — 機械検査の回帰確認。誤検出と見落としの実例から直した規則を、最小の構造定義で確かめる
 
 ## 位置づけ
 

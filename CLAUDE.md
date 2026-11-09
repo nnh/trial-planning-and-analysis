@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 作成日：2026-09-14
-改訂日：2026-09-14
+改訂日：2026-11-09
 
 ## リポジトリの性格
 
@@ -38,7 +38,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 python3 pipeline/scripts/python/check-environment.py      # 端末で何が回せるか。試験リポジトリが無くても動く
-python3 pipeline/scripts/python/read_xlsx_test.py         # read_xlsx.py の回帰確認。このリポジトリで唯一のテスト
+python3 pipeline/scripts/python/read_xlsx_test.py         # read_xlsx.py の回帰確認
+python3 review/ecrf-review/audit_ecrf_json_test.py        # audit_ecrf_json.py の回帰確認
 python3 review/planning-review/audit_sap_structure.py <文書>
 python3 review/planning-review/audit_declarations.py --metadata <dir> --acceptance <dir> [--sap <文書>]
 python3 review/ecrf-review/audit_ecrf_json.py <構造定義JSON>
