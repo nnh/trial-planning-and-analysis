@@ -158,7 +158,7 @@ def doc_allowed(name):
 #
 #   "sap_pdf": {"path": ["<試験管理側のフォルダ>", ..., "<SAP の PDF のファイル名>"],
 #               "fixed": "YYYY-MM-DD",
-#               "box_account": "<box-api のアカウント名>"}
+#               "box_account": "<box のアカウント名>"}
 #
 # この解析が従った規定そのものなので、欠けたまま渡すと結果値の根拠が一式の中で辿れない。
 # Box の同期先が端末によって違って解決できないときは、同梱を飛ばさず組み立てを止める
@@ -176,20 +176,20 @@ SAP_LI = (f'<a href="16_1_9_methods/{SAP_PDF_DST}">統計解析計画書'
           + '</a>と')
 
 
-# 固定版 SAP を持つ Box アカウント（box-api のアカウント名）。試験管理側の Box が
+# 固定版 SAP を持つ Box アカウント（box のアカウント名）。試験管理側の Box が
 # どの契約にあるかは試験ごとに違うので、置き場と同じく trial.json が持つ。
 SAP_BOX_ACCOUNT = _SAP.get('box_account') or ''
 
 
 def _box_cli():
-    """box-api（claude-toolkit の tools/box-api）の呼び方を決める。使えなければ None を返す。
+    """box（claude-toolkit の tools/box）の呼び方を決める。使えなければ None を返す。
 
     2026-11-24 に Box CLI から移した。Box CLI は既定の環境を切り替えて使い、選択に失敗すると
-    別アカウントの結果を黙って返すことがあったが、box-api はアカウントを毎回名指しする。"""
+    別アカウントの結果を黙って返すことがあったが、box はアカウントを毎回名指しする。"""
     if not SAP_BOX_ACCOUNT:
         return None
-    home = os.path.expanduser('~/bin/box-api')
-    b = shutil.which('box-api') or (home if os.path.exists(home) else None)
+    home = os.path.expanduser('~/bin/box')
+    b = home if os.path.exists(home) else None  # PATH の box は Box CLI のことがあるので引かない
     return [b, SAP_BOX_ACCOUNT] if b else None
 
 
@@ -210,7 +210,7 @@ def _box_child(cli, parent, name):
 
 
 def _sap_pdf_via_cli(tmp):
-    """box-api で固定版 SAP を取り、置いた先のパスを返す。取れなければ None。
+    """box で固定版 SAP を取り、置いた先のパスを返す。取れなければ None。
 
     Box Drive を同期していない端末でも納品パッケージを組めるようにするための代替経路
     （2026-09-02）。置き場の正本は SAP_PDF_SRC のままで、Drive 経由と同じ組を root から
@@ -237,7 +237,7 @@ def copy_sap_pdf(dest):
     """固定版 SAP を 16_1_9_methods へ写す。写したファイル数を返す
 
     経路は2つある。Box Drive の同期フォルダ（boxpath.box_root()）を先に見て、無ければ
-    box-api で取りに行く。どちらも駄目なときだけ止める。以前は Drive だけを見ており、
+    box で取りに行く。どちらも駄目なときだけ止める。以前は Drive だけを見ており、
     Drive を同期していない端末では組み立てそのものができなかった（2026-09-02）。"""
     if not SAP_PDF_SRC:
         sys.exit('固定版 SAP の置き場が docs/metadata/trial.json に無い（sap_pdf.path）。'
@@ -254,8 +254,8 @@ def copy_sap_pdf(dest):
             return 1
     sys.exit('固定版 SAP の PDF が見つからない。必須の同梱物なので組み立てを止める。\n'
              '  Box Drive: ' + os.path.join('<Box>', *SAP_PDF_SRC) + '\n'
-             f'  box-api  : box-api {SAP_BOX_ACCOUNT} で同じ組を root から辿る。'
-             f'ログインしていなければ box-api login {SAP_BOX_ACCOUNT} で入る')
+             f'  box  : box {SAP_BOX_ACCOUNT} で同じ組を root から辿る。'
+             f'ログインしていなければ box login {SAP_BOX_ACCOUNT} で入る')
 
 
 def copy_tree(src, dst, pat='*'):
