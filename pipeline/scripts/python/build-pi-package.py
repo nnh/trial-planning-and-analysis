@@ -188,7 +188,7 @@ def _box_cli():
     別アカウントの結果を黙って返すことがあったが、box はアカウントを毎回名指しする。"""
     if not SAP_BOX_ACCOUNT:
         return None
-    home = os.path.expanduser('~/bin/box')
+    home = os.path.expanduser('~/.local/bin/box')
     b = home if os.path.exists(home) else None  # PATH の box は Box CLI のことがあるので引かない
     return [b, SAP_BOX_ACCOUNT] if b else None
 
