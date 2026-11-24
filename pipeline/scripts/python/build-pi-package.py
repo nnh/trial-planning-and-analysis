@@ -158,7 +158,7 @@ def doc_allowed(name):
 #
 #   "sap_pdf": {"path": ["<試験管理側のフォルダ>", ..., "<SAP の PDF のファイル名>"],
 #               "fixed": "YYYY-MM-DD",
-#               "box_account": "<box-<環境> ラッパーの環境名>"}
+#               "box_account": "<box-api のアカウント名>"}
 #
 # この解析が従った規定そのものなので、欠けたまま渡すと結果値の根拠が一式の中で辿れない。
 # Box の同期先が端末によって違って解決できないときは、同梱を飛ばさず組み立てを止める
@@ -176,34 +176,26 @@ SAP_LI = (f'<a href="16_1_9_methods/{SAP_PDF_DST}">統計解析計画書'
           + '</a>と')
 
 
-# 固定版 SAP を持つ Box アカウント（box-<環境> ラッパーの環境名）。試験管理側の Box が
+# 固定版 SAP を持つ Box アカウント（box-api のアカウント名）。試験管理側の Box が
 # どの契約にあるかは試験ごとに違うので、置き場と同じく trial.json が持つ。
 SAP_BOX_ACCOUNT = _SAP.get('box_account') or ''
 
 
 def _box_cli():
-    """Box CLI の呼び方を決める。使えなければ None を返す。
+    """box-api（claude-toolkit の tools/box-api）の呼び方を決める。使えなければ None を返す。
 
-    ~/bin/box-<環境> のラッパーがあればそれを使う。環境の選択と、選択に失敗したときに
-    別アカウントの結果を黙って返さない仕掛けをラッパーが持つためである。無ければ素の
-    box に環境を選ばせてから使う（選択に失敗したらここで諦める。同じ理由で、選べない
-    まま直前の環境で走らせない）。"""
+    2026-11-24 に Box CLI から移した。Box CLI は既定の環境を切り替えて使い、選択に失敗すると
+    別アカウントの結果を黙って返すことがあったが、box-api はアカウントを毎回名指しする。"""
     if not SAP_BOX_ACCOUNT:
         return None
-    w = shutil.which('box-' + SAP_BOX_ACCOUNT)
-    if w:
-        return [w]
-    b = shutil.which('box')
-    if not b:
-        return None
-    r = subprocess.run([b, 'configure:environments:select', SAP_BOX_ACCOUNT],
-                       capture_output=True, text=True, encoding='utf-8', errors='replace')
-    return None if r.returncode else [b]
+    home = os.path.expanduser('~/bin/box-api')
+    b = shutil.which('box-api') or (home if os.path.exists(home) else None)
+    return [b, SAP_BOX_ACCOUNT] if b else None
 
 
 def _box_child(cli, parent, name):
     """Box のフォルダ直下を名前で1件引く。(種別, ID)。無ければ (None, None)"""
-    r = subprocess.run(cli + ['folders:items', parent, '--json'],
+    r = subprocess.run(cli + ['items', parent],
                        capture_output=True, text=True, encoding='utf-8', errors='replace')
     if r.returncode:
         return None, None
@@ -218,7 +210,7 @@ def _box_child(cli, parent, name):
 
 
 def _sap_pdf_via_cli(tmp):
-    """Box CLI で固定版 SAP を取り、置いた先のパスを返す。取れなければ None。
+    """box-api で固定版 SAP を取り、置いた先のパスを返す。取れなければ None。
 
     Box Drive を同期していない端末でも納品パッケージを組めるようにするための代替経路
     （2026-09-02）。置き場の正本は SAP_PDF_SRC のままで、Drive 経由と同じ組を root から
@@ -235,7 +227,7 @@ def _sap_pdf_via_cli(tmp):
             return None
     if kind != 'file':
         return None
-    r = subprocess.run(cli + ['files:download', fid, '--destination', tmp],
+    r = subprocess.run(cli + ['download', fid, tmp],
                        capture_output=True, text=True, encoding='utf-8', errors='replace')
     got = os.path.join(tmp, SAP_PDF_SRC[-1])
     return got if not r.returncode and os.path.isfile(got) else None
@@ -245,7 +237,7 @@ def copy_sap_pdf(dest):
     """固定版 SAP を 16_1_9_methods へ写す。写したファイル数を返す
 
     経路は2つある。Box Drive の同期フォルダ（boxpath.box_root()）を先に見て、無ければ
-    Box CLI で取りに行く。どちらも駄目なときだけ止める。以前は Drive だけを見ており、
+    box-api で取りに行く。どちらも駄目なときだけ止める。以前は Drive だけを見ており、
     Drive を同期していない端末では組み立てそのものができなかった（2026-09-02）。"""
     if not SAP_PDF_SRC:
         sys.exit('固定版 SAP の置き場が docs/metadata/trial.json に無い（sap_pdf.path）。'
@@ -262,9 +254,8 @@ def copy_sap_pdf(dest):
             return 1
     sys.exit('固定版 SAP の PDF が見つからない。必須の同梱物なので組み立てを止める。\n'
              '  Box Drive: ' + os.path.join('<Box>', *SAP_PDF_SRC) + '\n'
-             f'  Box CLI  : box-{SAP_BOX_ACCOUNT}（または box + 環境 {SAP_BOX_ACCOUNT}）で'
-             '同じ組を root から辿る。環境が無ければ '
-             f'box login --default-box-app --name {SAP_BOX_ACCOUNT} で作る')
+             f'  box-api  : box-api {SAP_BOX_ACCOUNT} で同じ組を root から辿る。'
+             f'ログインしていなければ box-api login {SAP_BOX_ACCOUNT} で入る')
 
 
 def copy_tree(src, dst, pat='*'):
