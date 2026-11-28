@@ -28,7 +28,7 @@
 - [audit_ecrf_json.py](../../review/ecrf-review/audit_ecrf_json.py) — R04 の上限を IE だけ200文字にし、R13 を足した
 - [audit_ecrf_json_test.py](../../review/ecrf-review/audit_ecrf_json_test.py) — 新規。R04 と R13 の回帰確認
 - [findings-log.md](../../review/ecrf-review/findings-log.md) — 見出しを広げて試験I の事例を足し、IETEST の上限と「レビュー側の誤り」の1件を足した
-- [checklist.md](../../review/ecrf-review/checklist.md)・[README.md](../../review/ecrf-review/README.md)・[CLAUDE.md](../../CLAUDE.md)・[SKILL.md](../../skills/trial-planning-review/SKILL.md)・[run-planning-review.py](../../skills/trial-planning-review/scripts/run-planning-review.py) — テストの追記と、規則の範囲を R01-R13 にする変更
+- [checklist.md](../../review/ecrf-review/checklist.md)・[README.md](../../review/ecrf-review/README.md)・[AGENTS.md](../../AGENTS.md)・[SKILL.md](../../skills/trial-planning-review/SKILL.md)・[run-planning-review.py](../../skills/trial-planning-review/scripts/run-planning-review.py) — テストの追記と、規則の範囲を R01-R13 にする変更
 - 本ログ
 
 ## 次回アクション
